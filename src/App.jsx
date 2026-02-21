@@ -1975,7 +1975,8 @@ const TABS = [
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [tab, setTab]       = useState("week");
+  const [tab, setTab_]      = useState(() => localStorage.getItem("mp-tab") || "week");
+  const setTab = t => { setTab_(t); localStorage.setItem("mp-tab", t); };
   const [goals, setGoals]     = useState({ fishMin: 1, vegMin: 2, readyBy: "18:30" });
   const [week, setWeek]       = useState([]);
   const [recipes, setRecipes] = useState([]);
