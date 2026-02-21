@@ -1,5 +1,27 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './styles.css';
+import { supabase } from './lib/supabase.js';
+import {
+  fetchRecipes, addRecipe as dbAddRecipe, updateRecipe as dbUpdateRecipe, deleteRecipe as dbDeleteRecipe, toAppRecipe,
+  fetchWeekPlan, upsertWeekDay, clearWeekPlan,
+  fetchBatchPrep, addBatchItem, removeBatchItem, clearBatchPrep,
+  fetchRadar, addRadarItem as dbAddRadarItem, removeRadarItem as dbRemoveRadarItem,
+  fetchFridge, addFridgeItem as dbAddFridgeItem, updateFridgeItem as dbUpdateFridgeItem, removeFridgeItem as dbRemoveFridgeItem,
+  fetchFreezer, addFreezerItem as dbAddFreezerItem, updateFreezerItem as dbUpdateFreezerItem, removeFreezerItem as dbRemoveFreezerItem,
+  fetchStaples, addStaple as dbAddStaple, updateStaple as dbUpdateStaple, removeStaple as dbRemoveStaple,
+  fetchRegulars, addRegular as dbAddRegular, removeRegular as dbRemoveRegular,
+  fetchPrefs, updatePrefs as dbUpdatePrefs,
+  fetchCustomTags, addCustomTag as dbAddCustomTag, removeCustomTag as dbRemoveCustomTag,
+  fetchCustomCategories, addCustomCategory as dbAddCustomCategory, removeCustomCategory as dbRemoveCustomCategory,
+  fetchShopChecked, toggleShopChecked as dbToggleShopChecked,
+  fetchRegChecked, toggleRegChecked as dbToggleRegChecked,
+  fetchFreeShop, addFreeShopItem as dbAddFreeShopItem, updateFreeShopItem as dbUpdateFreeShopItem,
+  fetchPrepTasks, addPrepTask as dbAddPrepTask, updatePrepTask as dbUpdatePrepTask,
+  fetchPrepChecked, togglePrepChecked as dbTogglePrepChecked,
+  THIS_WEEK,
+} from './lib/db.js';
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // ── Data ─────────────────────────────────────────────────────────────────────
 
@@ -471,23 +493,23 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
 
 // ── Shopping Sheet ────────────────────────────────────────────────────────────
 
-function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, setRegulars,
-  regChecked, setRegChecked, shopChecked, setShopChecked, freeShop, setFreeShop }) {
+function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAddRegular, onRemoveRegular,
+  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop }) {
 
   const [freeInput, setFreeInput] = useState("");
   const [regularInput, setRegularInput] = useState("");
 
-  const toggleReg  = id => setRegChecked(c => ({ ...c, [id]: !c[id] }));
-  const removeReg  = id => setRegulars(rr => rr.filter(r => r.id !== id));
+  const toggleReg  = id => onToggleRegChecked(id);
+  const removeReg  = id => onRemoveRegular(id);
   const addReg     = val => {
     const t = val.trim().toLowerCase();
-    if (t && !regulars.find(r => r.name === t)) setRegulars(rr => [...rr, { id: "reg:" + t + Date.now(), name: t }]);
+    if (t && !regulars.find(r => r.name === t)) onAddRegular(t);
     setRegularInput("");
   };
-  const toggleShop    = id => setShopChecked(c => ({ ...c, [id]: !c[id] }));
-  const toggleFreeShop = id => setFreeShop(f => f.map(i => i.id === id ? { ...i, done: !i.done } : i));
+  const toggleShop    = id => onToggleShopChecked(id);
+  const toggleFreeShop = id => onToggleFreeShop(id);
   const addFreeItem   = () => {
-    if (freeInput.trim()) { setFreeShop(f => [...f, { id: Date.now(), text: freeInput.trim(), done: false }]); setFreeInput(""); }
+    if (freeInput.trim()) { onAddFreeShop(freeInput.trim()); setFreeInput(""); }
   };
 
   // Derive recipe items — suppress if covered by stocked staple or freezer item
@@ -628,7 +650,7 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, setR
 // targetDay: the WEEK entry being edited (or null for "pick any unplanned day")
 // onClose, onSlot(dayIndex, recipe), onRemove(dayIndex), onAddRecipe(recipe)
 
-function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot, onRemove, onSlotNote, onAddRecipe, freezer, setFreezer, customTags = [], customCategories = [] }) {
+function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot, onRemove, onSlotNote, onAddRecipe, freezer, onAdjustFreezerQty, customTags = [], customCategories = [] }) {
   const [mode, setMode]       = useState(targetDay?.recipe ? "pick" : "pick");
   const [search, setSearch]   = useState("");
   const [newTitle, setNewTitle]         = useState("");
@@ -703,10 +725,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
   const confirmDeduct = () => {
     deductPrompt.matches.forEach(({ freezerItem, deduct }) => {
-      setFreezer(ff => ff
-        .map(i => i.id === freezerItem.id ? { ...i, qty: Math.max(0, i.qty - deduct) } : i)
-        .filter(i => i.qty > 0)
-      );
+      onAdjustFreezerQty(freezerItem.id, -deduct);
     });
     onSlot(dayIndex, deductPrompt.recipe);
     onClose();
@@ -1042,7 +1061,7 @@ function BatchSheet({ recipes, onClose, onAdd }) {
   );
 
   const handlePick = (r) => {
-    onAdd({ recipeId: r.id });
+    onAdd(r);
     onClose();
   };
 
@@ -1077,7 +1096,7 @@ function BatchSheet({ recipes, onClose, onAdd }) {
 }
 
 // ── Inline Shopping List (week tab) ──────────────────────────────────────────
-function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, setRegChecked, shopChecked, setShopChecked, freeShop, setFreeShop }) {
+function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop }) {
   const [freeInput, setFreeInput] = useState("");
 
   const okStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
@@ -1096,8 +1115,8 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   const allItems = [...stapleShopItems, ...deduped, ...freeShop];
 
   const toggleItem = (item) => {
-    if (item.done !== undefined) setFreeShop(f => f.map(i => i.id === item.id ? {...i, done: !i.done} : i));
-    else setShopChecked(c => ({...c, [item.id]: !c[item.id]}));
+    if (item.done !== undefined) onToggleFreeShop(item.id);
+    else onToggleShopChecked(item.id);
   };
 
   return (
@@ -1107,7 +1126,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
         <div className="week-shop-pills">
           {regulars.map(r => (
             <span key={r.id} className={"shop-pill" + (regChecked[r.id] ? " done" : "")}
-              onClick={() => setRegChecked(c => ({...c, [r.id]: !c[r.id]}))}>
+              onClick={() => onToggleRegChecked(r.id)}>
               {r.name}
             </span>
           ))}
@@ -1130,9 +1149,9 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
       <div style={{display:"flex", gap:8, marginBottom:10}}>
         <input className="pantry-add-input" placeholder="Add item…" style={{fontSize:11}} value={freeInput}
           onChange={e => setFreeInput(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && freeInput.trim()) { setFreeShop(f => [...f, {id: Date.now(), text: freeInput.trim(), done: false}]); setFreeInput(""); }}}/>
+          onKeyDown={e => { if (e.key === "Enter" && freeInput.trim()) { onAddFreeShop(freeInput.trim()); setFreeInput(""); }}}/>
         <button className="pantry-add-btn" disabled={!freeInput.trim()} style={{fontSize:11, padding:"6px 10px"}}
-          onClick={() => { if (freeInput.trim()) { setFreeShop(f => [...f, {id: Date.now(), text: freeInput.trim(), done: false}]); setFreeInput(""); }}}>Add</button>
+          onClick={() => { if (freeInput.trim()) { onAddFreeShop(freeInput.trim()); setFreeInput(""); }}}>Add</button>
       </div>
     </div>
   );
@@ -1140,25 +1159,22 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 
 // ── Week View ─────────────────────────────────────────────────────────────────
 
-function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopCount, fridge, freezer, setFreezer, staples, regulars, regChecked, setRegChecked, shopChecked, setShopChecked, freeShop, setFreeShop, radar, customTags, customCategories }) {
-  const [batch, setBatch]           = useState(BATCH_INIT);
-  const [freeformPrep, setFreeform] = useState([]); // { id, task, done }
+function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
+  batch, prepTasks, prepChecked, onSlot, onRemove, onSlotNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset,
+  onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
+  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty }) {
   const [shopOpen, setShopOpen]     = useState(true);
   const [prepOpen, setPrepOpen]     = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [checkedRecipePrep, setCheckedRecipePrep] = useState({}); // recipeId+day -> bool
   const [newPrepText, setNewPrepText] = useState("");
   const [sheet, setSheet]           = useState(null);
-  const [weekDetail, setWeekDetail] = useState(null); // recipe detail from week view
-  const [batchDetail, setBatchDetail] = useState(null); // batch item being viewed/edited
-
-  const toggleFreeform = id => setFreeform(p => p.map(i => i.id === id ? {...i, done: !i.done} : i));
-  const toggleRecipePrep = key => setCheckedRecipePrep(c => ({...c, [key]: !c[key]}));
+  const [weekDetail, setWeekDetail] = useState(null);
+  const [batchDetail, setBatchDetail] = useState(null);
 
   // Derived: one prep item per planned recipe that has a prepNote
   const recipePrepItems = week
     .filter(d => d.recipe?.prepNote)
-    .map(d => ({ key: d.day + d.recipe.id, task: d.recipe.prepNote, day: d.day, done: !!checkedRecipePrep[d.day + d.recipe.id] }));
+    .map(d => ({ key: d.day + d.recipe.id, task: d.recipe.prepNote, day: d.day, done: !!prepChecked[d.day + d.recipe.id] }));
 
   // Derived: thaw tasks — freezer items whose name matches a planned recipe ingredient
   const freezerNames = (freezer || []).map(i => i.item.toLowerCase());
@@ -1167,28 +1183,18 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
     .flatMap(d =>
       d.recipe.ingredients
         .filter(ing => freezerNames.includes(ing.toLowerCase()))
-        .map(ing => ({ key: "thaw:" + d.day + ":" + ing, ing, day: d.day, done: !!checkedRecipePrep["thaw:" + d.day + ":" + ing] }))
+        .map(ing => ({ key: "thaw:" + d.day + ":" + ing, ing, day: d.day, done: !!prepChecked["thaw:" + d.day + ":" + ing] }))
     );
 
   const openSheet = (dayIndex) => setSheet({ dayIndex });
   const closeSheet = () => setSheet(null);
 
-  const handleSlot = (dayIndex, recipe) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe} : d));
-  };
-  const handleRemove = (dayIndex) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: null, note: null} : d));
-  };
-  const handleSlotNote = (dayIndex, note) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, note: note.trim() || null, recipe: null} : d));
-  };
-  const handleAddRecipe = (recipe) => {
-    setRecipes(r => [...r, recipe]);
-  };
+  const handleSlot = (dayIndex, recipe) => { onSlot(dayIndex, recipe); };
+  const handleRemove = (dayIndex) => { onRemove(dayIndex); };
+  const handleSlotNote = (dayIndex, note) => { onSlotNote(dayIndex, note); };
+  const handleAddRecipe = (recipe) => { onAddRecipe(recipe); };
 
-  const handleAddBatch = ({ recipeId }) => {
-    setBatch(b => [...b, { id: Date.now(), recipeId }]);
-  };
+  const handleAddBatch = (recipe) => { onAddBatch(recipe); };
 
   const row1 = week.slice(0, 4);
   const row2 = week.slice(4, 7);
@@ -1216,9 +1222,7 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
               <span style={{fontSize:11, color:"var(--ink3)"}}>Clear everything?</span>
               <button className="shop-fab" style={{background:"var(--accent)", color:"#fff", borderColor:"var(--accent)", fontSize:11, padding:"6px 12px"}}
                 onClick={() => {
-                  setWeek(w => w.map(d => ({...d, recipe: null, note: null})));
-                  setBatch([]);
-                  setRegChecked({});
+                  onWeekReset();
                   setConfirmReset(false);
                 }}>Yes</button>
               <button className="shop-fab" style={{fontSize:11, padding:"6px 12px"}}
@@ -1297,13 +1301,12 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
       </div>
       <div className="batch-section">
         <div className="batch-row">
-          {batch.map(b => {
-            const r = recipes.find(x => x.id === b.recipeId);
+          {batch.map(r => {
             if (!r) return null;
             const recipeLink = r.pdfUrl || r.url || null;
             return (
-              <div key={b.id} className="batch-recipe-card" onClick={() => setBatchDetail(r)}>
-                <button className="batch-card-remove" onClick={e => { e.stopPropagation(); setBatch(bb => bb.filter(x => x.id !== b.id)); }}>×</button>
+              <div key={r.id} className="batch-recipe-card" onClick={() => setBatchDetail(r)}>
+                <button className="batch-card-remove" onClick={e => { e.stopPropagation(); onRemoveBatch(r.id); }}>×</button>
                 <div className="batch-card-body">
                   <div className="batch-card-title">{r.title}</div>
                   {recipeLink ? (
@@ -1336,7 +1339,7 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
         <div className="prep-list">
           {thawItems.map(p => (
             <div key={p.key} className="prep-item" style={{opacity: p.done ? 0.45 : 1}}>
-              <input type="checkbox" checked={p.done} onChange={() => toggleRecipePrep(p.key)}/>
+              <input type="checkbox" checked={p.done} onChange={() => onTogglePrepChecked(p.key)}/>
               <span className="prep-item-text" style={{textDecoration: p.done ? "line-through" : "none"}}>
                 Thaw {p.ing}
               </span>
@@ -1345,19 +1348,19 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
           ))}
           {recipePrepItems.map(p => (
             <div key={p.key} className="prep-item" style={{opacity: p.done ? 0.45 : 1}}>
-              <input type="checkbox" checked={p.done} onChange={() => toggleRecipePrep(p.key)}/>
+              <input type="checkbox" checked={p.done} onChange={() => onTogglePrepChecked(p.key)}/>
               <span className="prep-item-text" style={{textDecoration: p.done ? "line-through" : "none"}}>{p.task}</span>
               <span className="prep-recipe-tag">For {p.day}</span>
             </div>
           ))}
-          {freeformPrep.map(p => (
+          {prepTasks.map(p => (
             <div key={p.id} className="prep-item" style={{opacity: p.done ? 0.45 : 1}}>
-              <input type="checkbox" checked={p.done} onChange={() => toggleFreeform(p.id)}/>
+              <input type="checkbox" checked={p.done} onChange={() => onTogglePrepTask(p.id)}/>
               <span className="prep-item-text" style={{textDecoration: p.done ? "line-through" : "none"}}>{p.task}</span>
               <span className="prep-recipe-tag" style={{opacity:0.4}}>custom</span>
             </div>
           ))}
-          {thawItems.length === 0 && recipePrepItems.length === 0 && freeformPrep.length === 0 && (
+          {thawItems.length === 0 && recipePrepItems.length === 0 && prepTasks.length === 0 && (
             <div style={{padding:"14px 0", color:"var(--ink4)", fontSize:12, fontStyle:"italic"}}>
               Prep tasks will appear here once dinners are planned.
             </div>
@@ -1371,7 +1374,7 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
             onChange={e => setNewPrepText(e.target.value)}
             onKeyDown={e => {
               if (e.key === "Enter" && newPrepText.trim()) {
-                setFreeform(p => [...p, { id: Date.now(), task: newPrepText.trim(), done: false }]);
+                onAddPrepTask(newPrepText.trim());
                 setNewPrepText("");
               }
             }}
@@ -1381,7 +1384,7 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
             disabled={!newPrepText.trim()}
             onClick={() => {
               if (newPrepText.trim()) {
-                setFreeform(p => [...p, { id: Date.now(), task: newPrepText.trim(), done: false }]);
+                onAddPrepTask(newPrepText.trim());
                 setNewPrepText("");
               }
             }}
@@ -1396,9 +1399,9 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
       {shopOpen && (
         <WeekShoppingList
           week={week} staples={staples} freezer={freezer} fridge={fridge}
-          regulars={regulars} regChecked={regChecked} setRegChecked={setRegChecked}
-          shopChecked={shopChecked} setShopChecked={setShopChecked}
-          freeShop={freeShop} setFreeShop={setFreeShop}
+          regulars={regulars} regChecked={regChecked} onToggleRegChecked={onToggleRegChecked}
+          shopChecked={shopChecked} onToggleShopChecked={onToggleShopChecked}
+          freeShop={freeShop} onAddFreeShop={onAddFreeShop} onToggleFreeShop={onToggleFreeShop}
         />
       )}
 
@@ -1407,11 +1410,11 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
           recipe={weekDetail}
           onClose={() => setWeekDetail(null)}
           onSave={updated => {
-            setRecipes(rs => rs.map(r => r.id === updated.id ? updated : r));
+            onUpdateRecipe(updated);
             setWeekDetail(null);
           }}
           onDelete={id => {
-            setRecipes(rs => rs.filter(r => r.id !== id));
+            onDeleteRecipe(id);
             setWeekDetail(null);
           }}
           customTags={customTags} customCategories={customCategories}
@@ -1422,11 +1425,11 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
           recipe={batchDetail}
           onClose={() => setBatchDetail(null)}
           onSave={updated => {
-            setRecipes(rs => rs.map(r => r.id === updated.id ? updated : r));
+            onUpdateRecipe(updated);
             setBatchDetail(null);
           }}
           onDelete={id => {
-            setRecipes(rs => rs.filter(r => r.id !== id));
+            onDeleteRecipe(id);
             setBatchDetail(null);
           }}
           customTags={customTags} customCategories={customCategories}
@@ -1444,7 +1447,7 @@ function WeekView({ goals, week, setWeek, recipes, setRecipes, onOpenShop, shopC
           onRemove={handleRemove}
           onAddRecipe={handleAddRecipe}
           freezer={freezer}
-          setFreezer={setFreezer}
+          onAdjustFreezerQty={onAdjustFreezerQty}
           onSlotNote={handleSlotNote}
           customTags={customTags}
           customCategories={customCategories}
@@ -1502,7 +1505,7 @@ function RadarDetailSheet({ item, onClose, onPromote, onPlan }) {
   );
 }
 
-function RecipesView({ recipes, setRecipes, radar, setRadar, customTags = [], customCategories = [] }) {
+function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, radar, onAddRadar, onRemoveRadar, customTags = [], customCategories = [] }) {
   const [filter, setFilter]     = useState("all");
   const [detail, setDetail]     = useState(null);
   const [adding, setAdding]     = useState(false);
@@ -1520,7 +1523,7 @@ function RecipesView({ recipes, setRecipes, radar, setRadar, customTags = [], cu
 
   const handleAddRadar = () => {
     if (!radarTitle.trim()) return;
-    setRadar(rr => [...rr, { id: "r"+Date.now(), title: radarTitle.trim(), url: radarUrl.trim() || null, source: radarSource.trim() || "" }]);
+    onAddRadar({ title: radarTitle.trim(), url: radarUrl.trim() || null, source: radarSource.trim() || "" });
     setRadarTitle(""); setRadarUrl(""); setRadarSource(""); setAddingRadar(false);
   };
   const handlePromoteRadar = (item) => {
@@ -1554,7 +1557,7 @@ function RecipesView({ recipes, setRecipes, radar, setRadar, customTags = [], cu
                   <span className="radar-row-title">{item.title}</span>
                 )}
                 <button className="radar-row-promote" onClick={() => handlePromoteRadar(item)} title="Add to library">+ library</button>
-                <button className="radar-row-remove" onClick={() => setRadar(rr => rr.filter(r => r.id !== item.id))}>×</button>
+                <button className="radar-row-remove" onClick={() => onRemoveRadar(item.id)}>×</button>
               </div>
             ))}
           </div>
@@ -1627,11 +1630,11 @@ function RecipesView({ recipes, setRecipes, radar, setRadar, customTags = [], cu
           recipe={detail}
           onClose={() => setDetail(null)}
           onSave={updated => {
-            setRecipes(rs => rs.map(r => r.id === updated.id ? updated : r));
+            onUpdateRecipe(updated);
             setDetail(null);
           }}
           onDelete={id => {
-            setRecipes(rs => rs.filter(r => r.id !== id));
+            onDeleteRecipe(id);
             setDetail(null);
           }}
           customTags={customTags} customCategories={customCategories}
@@ -1647,7 +1650,7 @@ function RecipesView({ recipes, setRecipes, radar, setRadar, customTags = [], cu
       {adding && (
         <AddRecipeSheet
           onClose={() => setAdding(false)}
-          onAdd={recipe => setRecipes(rs => [...rs, recipe])}
+          onAdd={recipe => onAddRecipe(recipe)}
           customTags={customTags} customCategories={customCategories}
         />
       )}
@@ -1656,8 +1659,8 @@ function RecipesView({ recipes, setRecipes, radar, setRadar, customTags = [], cu
           prefill={{ title: promotingRadar.title, source: promotingRadar.source || "", url: promotingRadar.url || "" }}
           onClose={() => setPromotingRadar(null)}
           onAdd={recipe => {
-            setRecipes(rs => [...rs, recipe]);
-            setRadar(rr => rr.filter(r => r.id !== promotingRadar.id));
+            onAddRecipe(recipe);
+            onRemoveRadar(promotingRadar.id);
             setPromotingRadar(null);
           }}
           customTags={customTags} customCategories={customCategories}
@@ -1669,39 +1672,34 @@ function RecipesView({ recipes, setRecipes, radar, setRadar, customTags = [], cu
 
 // ── Inventory & Prefs ─────────────────────────────────────────────────────────
 
-function InventoryView({ week, recipes, staples, setStaples, regulars, setRegulars, fridge, setFridge, freezer, setFreezer }) {
+function InventoryView({ week, recipes, staples, onAddStaple, onCycleStaple, onRemoveStaple, regulars, onAddRegular, onRemoveRegular, fridge, onAddFridge, onCycleFridge, onRemoveFridge, freezer, onAddFreezer, onAdjustFreezerQty, onRemoveFreezer }) {
   const [stapleInput, setStapleInput]   = useState("");
   const [regularInput, setRegularInput] = useState("");
-
-  const removeReg  = id => setRegulars(rr => rr.filter(r => r.id !== id));
-  const addRegular = val => {
-    const t = val.trim().toLowerCase();
-    if (t && !regulars.find(r => r.name === t)) setRegulars(rr => [...rr, { id: "reg:" + t + Date.now(), name: t }]);
-    setRegularInput("");
-  };
   const [fridgeInput,  setFridgeInput]  = useState("");
   const [freezerInput, setFreezerInput] = useState("");
 
-  const cycleFridge  = id => setFridge(ff => ff.map(i => i.id===id ? {...i, s: i.s==="ok"?"soon":"ok"} : i));
-  const removeFridge = id => setFridge(ff => ff.filter(i => i.id!==id));
-  const addFridge    = val => { const t=val.trim(); if(t) setFridge(ff=>[...ff,{item:t,s:"ok",id:"f"+Date.now()}]); setFridgeInput(""); };
+  const removeReg  = id => onRemoveRegular(id);
+  const addRegular = val => {
+    const t = val.trim().toLowerCase();
+    if (t && !regulars.find(r => r.name === t)) onAddRegular(t);
+    setRegularInput("");
+  };
 
-  const adjustFreezerQty = (id, delta) => setFreezer(ff => ff
-    .map(i => i.id===id ? {...i, qty: Math.max(0, (i.qty ?? 1) + delta)} : i)
-    .filter(i => i.qty > 0)
-  );
-  const removeFreezer = id => setFreezer(ff => ff.filter(i => i.id!==id));
-  const addFreezer    = val => { const t=val.trim(); if(t) setFreezer(ff=>[...ff,{item:t, qty:1, id:"z"+Date.now()}]); setFreezerInput(""); };
+  const cycleFridge  = id => onCycleFridge(id);
+  const removeFridge = id => onRemoveFridge(id);
+  const addFridge    = val => { const t=val.trim(); if(t) onAddFridge(t, "ok"); setFridgeInput(""); };
 
-  const cycleStaple = name => setStaples(ss => ss.map(s =>
-    s.name === name ? { ...s, status: s.status === "ok" ? "restock" : "ok" } : s
-  ));
+  const adjustFreezerQty = (id, delta) => onAdjustFreezerQty(id, delta);
+  const removeFreezer = id => onRemoveFreezer(id);
+  const addFreezer    = val => { const t=val.trim(); if(t) onAddFreezer(t, 1); setFreezerInput(""); };
+
+  const cycleStaple = name => onCycleStaple(name);
   const addStaple = val => {
     const t = val.trim().toLowerCase();
-    if (t && !staples.find(s => s.name === t)) setStaples(ss => [...ss, { name: t, status: "ok" }]);
+    if (t && !staples.find(s => s.name === t)) onAddStaple(t);
     setStapleInput("");
   };
-  const removeStaple = name => setStaples(ss => ss.filter(s => s.name !== name));
+  const removeStaple = name => onRemoveStaple(name);
 
   return (
     <div className="tab-section">
@@ -1797,7 +1795,7 @@ function InventoryView({ week, recipes, staples, setStaples, regulars, setRegula
   );
 }
 
-function PrefsView({ goals, updateGoal, customTags, setCustomTags, customCategories, setCustomCategories }) {
+function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCustomTag, customCategories, onAddCustomCategory, onRemoveCustomCategory }) {
   const [newTag, setNewTag]       = useState("");
   const [newCat, setNewCat]       = useState("");
 
@@ -1858,16 +1856,16 @@ function PrefsView({ goals, updateGoal, customTags, setCustomTags, customCategor
           {customTags.map(t => (
             <span key={t} className="pantry-pill">
               {t}
-              <button className="pp-remove" onClick={() => setCustomTags(tt => tt.filter(x => x !== t))}>×</button>
+              <button className="pp-remove" onClick={() => onRemoveCustomTag(t)}>×</button>
             </span>
           ))}
         </div>
         <div className="pantry-pill-add">
           <input className="pantry-add-input" placeholder="Add a tag…" value={newTag}
             onChange={e => setNewTag(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && newTag.trim() && !["fish","vegetarian",...customTags].includes(newTag.trim().toLowerCase())) { setCustomTags(tt => [...tt, newTag.trim().toLowerCase()]); setNewTag(""); }}}/>
+            onKeyDown={e => { if (e.key === "Enter" && newTag.trim() && !["fish","vegetarian",...customTags].includes(newTag.trim().toLowerCase())) { onAddCustomTag(newTag.trim().toLowerCase()); setNewTag(""); }}}/>
           <button className="pantry-add-btn" disabled={!newTag.trim()}
-            onClick={() => { const t = newTag.trim().toLowerCase(); if (t && !["fish","vegetarian",...customTags].includes(t)) { setCustomTags(tt => [...tt, t]); setNewTag(""); }}}>Add</button>
+            onClick={() => { const t = newTag.trim().toLowerCase(); if (t && !["fish","vegetarian",...customTags].includes(t)) { onAddCustomTag(t); setNewTag(""); }}}>Add</button>
         </div>
       </div>
 
@@ -1880,16 +1878,16 @@ function PrefsView({ goals, updateGoal, customTags, setCustomTags, customCategor
           {customCategories.map(c => (
             <span key={c} className="pantry-pill">
               {c}
-              <button className="pp-remove" onClick={() => setCustomCategories(cc => cc.filter(x => x !== c))}>×</button>
+              <button className="pp-remove" onClick={() => onRemoveCustomCategory(c)}>×</button>
             </span>
           ))}
         </div>
         <div className="pantry-pill-add">
           <input className="pantry-add-input" placeholder="Add a category…" value={newCat}
             onChange={e => setNewCat(e.target.value)}
-            onKeyDown={e => { const builtins = ["dinner","breakfast","sweets"]; if (e.key === "Enter" && newCat.trim() && !builtins.includes(newCat.trim().toLowerCase()) && !customCategories.includes(newCat.trim())) { setCustomCategories(cc => [...cc, newCat.trim()]); setNewCat(""); }}}/>
+            onKeyDown={e => { const builtins = ["dinner","breakfast","sweets"]; if (e.key === "Enter" && newCat.trim() && !builtins.includes(newCat.trim().toLowerCase()) && !customCategories.includes(newCat.trim())) { onAddCustomCategory(newCat.trim()); setNewCat(""); }}}/>
           <button className="pantry-add-btn" disabled={!newCat.trim()}
-            onClick={() => { const builtins = ["dinner","breakfast","sweets"]; const c = newCat.trim(); if (c && !builtins.includes(c.toLowerCase()) && !customCategories.includes(c)) { setCustomCategories(cc => [...cc, c]); setNewCat(""); }}}>Add</button>
+            onClick={() => { const builtins = ["dinner","breakfast","sweets"]; const c = newCat.trim(); if (c && !builtins.includes(c.toLowerCase()) && !customCategories.includes(c)) { onAddCustomCategory(c); setNewCat(""); }}}>Add</button>
         </div>
       </div>
     </div>
@@ -1906,29 +1904,319 @@ const TABS = [
 ];
 
 export default function App() {
+  const [loading, setLoading] = useState(true);
   const [tab, setTab]       = useState("week");
   const [goals, setGoals]     = useState({ fishMin: 1, vegMin: 2, readyBy: "18:30" });
-  const [week, setWeek]       = useState(WEEK_INIT);
-  const [recipes, setRecipes] = useState(RECIPES_INIT);
-  const [staples, setStaples] = useState(STAPLES_INIT);
-  const [regulars, setRegulars] = useState(WEEKLY_REGULARS_INIT);
+  const [week, setWeek]       = useState([]);
+  const [recipes, setRecipes] = useState([]);
+  const [staples, setStaples] = useState([]);
+  const [regulars, setRegulars] = useState([]);
   const [regChecked, setRegChecked]   = useState({});
   const [shopChecked, setShopChecked] = useState({});
   const [freeShop, setFreeShop]       = useState([]);
   const [shopSheetOpen, setShopSheetOpen] = useState(false);
-  const [fridge, setFridge] = useState(INV_INIT.fridge.map((i,idx) => ({...i, id:"f"+idx})));
-  const [radar, setRadar]   = useState(RADAR_INIT);
+  const [fridge, setFridge] = useState([]);
+  const [radar, setRadar]   = useState([]);
   const [customTags, setCustomTags]             = useState([]);
   const [customCategories, setCustomCategories] = useState([]);
-  const [freezer, setFreezer] = useState(INV_INIT.freezer.map((i,idx) => ({...i, id:"z"+idx, qty: i.qty ?? 1})));
+  const [freezer, setFreezer] = useState([]);
+  const [batch, setBatch]     = useState([]);
+  const [prepTasks, setPrepTasks]     = useState([]);
+  const [prepChecked, setPrepChecked] = useState({});
+
+  // ── Load all data from Supabase ──
+  useEffect(() => {
+    async function loadAll() {
+      try {
+        const [recipesData, weekData, batchData, radarData, fridgeData, freezerData,
+               staplesData, regularsData, prefsData, customTagsData, customCatsData,
+               shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData] = await Promise.all([
+          fetchRecipes(),
+          fetchWeekPlan(),
+          fetchBatchPrep(),
+          fetchRadar(),
+          fetchFridge(),
+          fetchFreezer(),
+          fetchStaples(),
+          fetchRegulars(),
+          fetchPrefs(),
+          fetchCustomTags(),
+          fetchCustomCategories(),
+          fetchShopChecked(),
+          fetchRegChecked(),
+          fetchFreeShop(),
+          fetchPrepTasks(),
+          fetchPrepChecked(),
+        ]);
+        setRecipes(recipesData.map(toAppRecipe));
+        setWeek(weekData);
+        setBatch(batchData);
+        setRadar(radarData);
+        setFridge(fridgeData);
+        setFreezer(freezerData);
+        setStaples(staplesData);
+        setRegulars(regularsData);
+        setGoals(prefsData);
+        setCustomTags(customTagsData);
+        setCustomCategories(customCatsData);
+        setShopChecked(shopCheckedData);
+        setRegChecked(regCheckedData);
+        setFreeShop(freeShopData);
+        setPrepTasks(prepTasksData);
+        setPrepChecked(prepCheckedData);
+      } catch (e) { console.error('loadAll failed', e); }
+      setLoading(false);
+    }
+    loadAll();
+
+    // Realtime — sync week plan, batch, and shopping across devices
+    const weekSub = supabase
+      .channel('week_plan')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'week_plan' }, () => {
+        fetchWeekPlan().then(setWeek);
+      })
+      .subscribe();
+    const batchSub = supabase
+      .channel('batch_prep')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'batch_prep' }, () => {
+        fetchBatchPrep().then(setBatch);
+      })
+      .subscribe();
+    const shopSub = supabase
+      .channel('shop_checked')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shop_checked' }, () => {
+        fetchShopChecked().then(setShopChecked);
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(weekSub);
+      supabase.removeChannel(batchSub);
+      supabase.removeChannel(shopSub);
+    };
+  }, []);
+
+  // ── Recipe handlers ──
+  const handleAddRecipe = async (recipe) => {
+    try {
+      const saved = await dbAddRecipe(recipe);
+      setRecipes(rs => [...rs, toAppRecipe(saved)]);
+    } catch (e) { console.error(e); }
+  };
+  const handleUpdateRecipe = async (recipe) => {
+    setRecipes(rs => rs.map(r => r.id === recipe.id ? recipe : r));
+    try { await dbUpdateRecipe(recipe.id, recipe); } catch (e) { console.error(e); }
+  };
+  const handleDeleteRecipe = async (id) => {
+    setRecipes(rs => rs.filter(r => r.id !== id));
+    try { await dbDeleteRecipe(id); } catch (e) { console.error(e); }
+  };
+
+  // ── Week handlers ──
+  const handleSlot = async (dayIndex, recipe) => {
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe, note: null} : d));
+    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: recipe.id, note: null }); } catch (e) { console.error(e); }
+  };
+  const handleRemove = async (dayIndex) => {
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: null, note: null} : d));
+    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null }); } catch (e) { console.error(e); }
+  };
+  const handleSlotNote = async (dayIndex, note) => {
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, note: note.trim() || null, recipe: null} : d));
+    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: note.trim() || null }); } catch (e) { console.error(e); }
+  };
+  const handleWeekReset = async () => {
+    setWeek(DAY_NAMES.map(day => ({ day, recipe: null, note: null })));
+    setBatch([]);
+    setRegChecked({});
+    try { await clearWeekPlan(THIS_WEEK); await clearBatchPrep(THIS_WEEK); } catch (e) { console.error(e); }
+  };
+
+  // ── Batch handlers ──
+  const handleAddBatch = async (recipe) => {
+    setBatch(b => [...b, recipe]);
+    try { await addBatchItem(THIS_WEEK, recipe.id); } catch (e) { console.error(e); }
+  };
+  const handleRemoveBatch = async (recipeId) => {
+    setBatch(b => b.filter(r => r.id !== recipeId));
+    try { await removeBatchItem(THIS_WEEK, recipeId); } catch (e) { console.error(e); }
+  };
+
+  // ── Radar handlers ──
+  const handleAddRadar = async (item) => {
+    try {
+      const saved = await dbAddRadarItem(item);
+      setRadar(r => [saved, ...r]);
+    } catch (e) { console.error(e); }
+  };
+  const handleRemoveRadar = async (id) => {
+    setRadar(r => r.filter(x => x.id !== id));
+    try { await dbRemoveRadarItem(id); } catch (e) { console.error(e); }
+  };
+
+  // ── Prefs handler ──
   const updateGoal = (key, delta) => setGoals(g => {
+    let next;
     if (key === "readyBy") {
       const mins = toMins(g.readyBy) + delta;
       const clamped = Math.max(16*60, Math.min(21*60, mins));
-      return { ...g, readyBy: toTime(clamped) };
+      next = { ...g, readyBy: toTime(clamped) };
+    } else {
+      next = { ...g, [key]: Math.max(0, Math.min(7, g[key] + delta)) };
     }
-    return { ...g, [key]: Math.max(0, Math.min(7, g[key] + delta)) };
+    dbUpdatePrefs(next);
+    return next;
   });
+
+  // ── Fridge handlers ──
+  const handleAddFridge = async (itemName, status) => {
+    try {
+      const saved = await dbAddFridgeItem(itemName, status);
+      setFridge(ff => [...ff, saved]);
+    } catch (e) { console.error(e); }
+  };
+  const handleCycleFridge = async (id) => {
+    let newStatus;
+    setFridge(ff => ff.map(i => {
+      if (i.id === id) { newStatus = i.s === "ok" ? "soon" : "ok"; return {...i, s: newStatus}; }
+      return i;
+    }));
+    try { await dbUpdateFridgeItem(id, { s: newStatus }); } catch (e) { console.error(e); }
+  };
+  const handleRemoveFridge = async (id) => {
+    setFridge(ff => ff.filter(i => i.id !== id));
+    try { await dbRemoveFridgeItem(id); } catch (e) { console.error(e); }
+  };
+
+  // ── Freezer handlers ──
+  const handleAddFreezer = async (itemName, qty) => {
+    try {
+      const saved = await dbAddFreezerItem(itemName, qty);
+      setFreezer(ff => [...ff, saved]);
+    } catch (e) { console.error(e); }
+  };
+  const handleAdjustFreezerQty = async (id, delta) => {
+    let newQty;
+    setFreezer(ff => ff
+      .map(i => { if (i.id === id) { newQty = Math.max(0, (i.qty ?? 1) + delta); return {...i, qty: newQty}; } return i; })
+      .filter(i => i.qty > 0)
+    );
+    try {
+      if (newQty === 0) await dbRemoveFreezerItem(id);
+      else await dbUpdateFreezerItem(id, { qty: newQty });
+    } catch (e) { console.error(e); }
+  };
+  const handleRemoveFreezer = async (id) => {
+    setFreezer(ff => ff.filter(i => i.id !== id));
+    try { await dbRemoveFreezerItem(id); } catch (e) { console.error(e); }
+  };
+
+  // ── Staples handlers ──
+  const handleAddStaple = async (name) => {
+    setStaples(ss => [...ss, { name, status: "ok" }]);
+    try { await dbAddStaple(name); } catch (e) { console.error(e); }
+  };
+  const handleCycleStaple = async (name) => {
+    let newStatus;
+    setStaples(ss => ss.map(s => {
+      if (s.name === name) { newStatus = s.status === "ok" ? "restock" : "ok"; return {...s, status: newStatus}; }
+      return s;
+    }));
+    try { await dbUpdateStaple(name, newStatus); } catch (e) { console.error(e); }
+  };
+  const handleRemoveStaple = async (name) => {
+    setStaples(ss => ss.filter(s => s.name !== name));
+    try { await dbRemoveStaple(name); } catch (e) { console.error(e); }
+  };
+
+  // ── Regulars handlers ──
+  const handleAddRegular = async (name) => {
+    try {
+      const saved = await dbAddRegular(name);
+      setRegulars(rr => [...rr, saved]);
+    } catch (e) { console.error(e); }
+  };
+  const handleRemoveRegular = async (id) => {
+    setRegulars(rr => rr.filter(r => r.id !== id));
+    try { await dbRemoveRegular(id); } catch (e) { console.error(e); }
+  };
+
+  // ── Custom tags/categories handlers ──
+  const handleAddCustomTag = async (name) => {
+    setCustomTags(t => [...t, name]);
+    try { await dbAddCustomTag(name); } catch (e) { console.error(e); }
+  };
+  const handleRemoveCustomTag = async (name) => {
+    setCustomTags(t => t.filter(x => x !== name));
+    try { await dbRemoveCustomTag(name); } catch (e) { console.error(e); }
+  };
+  const handleAddCustomCategory = async (name) => {
+    setCustomCategories(c => [...c, name]);
+    try { await dbAddCustomCategory(name); } catch (e) { console.error(e); }
+  };
+  const handleRemoveCustomCategory = async (name) => {
+    setCustomCategories(c => c.filter(x => x !== name));
+    try { await dbRemoveCustomCategory(name); } catch (e) { console.error(e); }
+  };
+
+  // ── Shopping checked handlers ──
+  const handleToggleShopChecked = async (key) => {
+    const wasChecked = shopChecked[key];
+    setShopChecked(c => wasChecked
+      ? Object.fromEntries(Object.entries(c).filter(([k]) => k !== key))
+      : {...c, [key]: true});
+    try { await dbToggleShopChecked(THIS_WEEK, key, !wasChecked); } catch (e) { console.error(e); }
+  };
+  const handleToggleRegChecked = async (key) => {
+    const wasChecked = regChecked[key];
+    setRegChecked(c => wasChecked
+      ? Object.fromEntries(Object.entries(c).filter(([k]) => k !== key))
+      : {...c, [key]: true});
+    try { await dbToggleRegChecked(THIS_WEEK, key, !wasChecked); } catch (e) { console.error(e); }
+  };
+
+  // ── Free shop handlers ──
+  const handleAddFreeShop = async (text) => {
+    try {
+      const saved = await dbAddFreeShopItem(text);
+      setFreeShop(f => [...f, saved]);
+    } catch (e) { console.error(e); }
+  };
+  const handleToggleFreeShop = async (id) => {
+    let newDone;
+    setFreeShop(f => f.map(i => { if (i.id === id) { newDone = !i.done; return {...i, done: newDone}; } return i; }));
+    try { await dbUpdateFreeShopItem(id, { done: newDone }); } catch (e) { console.error(e); }
+  };
+
+  // ── Prep tasks handlers ──
+  const handleAddPrepTask = async (task) => {
+    try {
+      const saved = await dbAddPrepTask(THIS_WEEK, task);
+      setPrepTasks(p => [...p, saved]);
+    } catch (e) { console.error(e); }
+  };
+  const handleTogglePrepTask = async (id) => {
+    let newDone;
+    setPrepTasks(p => p.map(i => { if (i.id === id) { newDone = !i.done; return {...i, done: newDone}; } return i; }));
+    try { await dbUpdatePrepTask(id, { done: newDone }); } catch (e) { console.error(e); }
+  };
+
+  // ── Prep checked handlers ──
+  const handleTogglePrepChecked = async (key) => {
+    const wasChecked = prepChecked[key];
+    setPrepChecked(c => wasChecked
+      ? Object.fromEntries(Object.entries(c).filter(([k]) => k !== key))
+      : {...c, [key]: true});
+    try { await dbTogglePrepChecked(THIS_WEEK, key, !wasChecked); } catch (e) { console.error(e); }
+  };
+
+  // ── Loading screen ──
+  if (loading) return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',
+      height:'100vh',fontFamily:'Playfair Display,serif',fontSize:18,color:'var(--ink3)'}}>
+      Loading…
+    </div>
+  );
+
   // Compute total unchecked for badge — exclude stapled and freezer-covered items
   const okStapleNames    = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
   const freezerItemNames = freezer.map(i => i.item.toLowerCase());
@@ -1943,10 +2231,16 @@ export default function App() {
   const totalUnchecked = regsLeft + [...new Set(recipeIngCount)].filter(i => !shopChecked["Mon:"+i] && !shopChecked["Tue:"+i]).length + stapleNeedCount + freeShop.filter(f => !f.done).length;
 
   const views = {
-    week:    <WeekView goals={goals} week={week} setWeek={setWeek} recipes={recipes} setRecipes={setRecipes} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} setFreezer={setFreezer} staples={staples} regulars={regulars} regChecked={regChecked} setRegChecked={setRegChecked} shopChecked={shopChecked} setShopChecked={setShopChecked} freeShop={freeShop} setFreeShop={setFreeShop} radar={radar} customTags={customTags} customCategories={customCategories} />,
-    recipes: <RecipesView recipes={recipes} setRecipes={setRecipes} radar={radar} setRadar={setRadar} onSlotRadar={null} customTags={customTags} customCategories={customCategories} />,
-    pantry:  <InventoryView week={week} recipes={recipes} staples={staples} setStaples={setStaples} regulars={regulars} setRegulars={setRegulars} fridge={fridge} setFridge={setFridge} freezer={freezer} setFreezer={setFreezer} />,
-    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} setCustomTags={setCustomTags} customCategories={customCategories} setCustomCategories={setCustomCategories} />,
+    week:    <WeekView goals={goals} week={week} recipes={recipes} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} staples={staples} regulars={regulars} regChecked={regChecked} shopChecked={shopChecked} freeShop={freeShop} radar={radar} customTags={customTags} customCategories={customCategories}
+      batch={batch} prepTasks={prepTasks} prepChecked={prepChecked}
+      onSlot={handleSlot} onRemove={handleRemove} onSlotNote={handleSlotNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset}
+      onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
+      onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
+      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop}
+      onAdjustFreezerQty={handleAdjustFreezerQty} />,
+    recipes: <RecipesView recipes={recipes} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} customTags={customTags} customCategories={customCategories} />,
+    pantry:  <InventoryView week={week} recipes={recipes} staples={staples} onAddStaple={handleAddStaple} onCycleStaple={handleCycleStaple} onRemoveStaple={handleRemoveStaple} regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular} fridge={fridge} onAddFridge={handleAddFridge} onCycleFridge={handleCycleFridge} onRemoveFridge={handleRemoveFridge} freezer={freezer} onAddFreezer={handleAddFreezer} onAdjustFreezerQty={handleAdjustFreezerQty} onRemoveFreezer={handleRemoveFreezer} />,
+    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} />,
   };
   return (
     <>
@@ -1959,10 +2253,10 @@ export default function App() {
             staples={staples}
             freezer={freezer}
             fridge={fridge}
-            regulars={regulars} setRegulars={setRegulars}
-            regChecked={regChecked} setRegChecked={setRegChecked}
-            shopChecked={shopChecked} setShopChecked={setShopChecked}
-            freeShop={freeShop} setFreeShop={setFreeShop}
+            regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular}
+            regChecked={regChecked} onToggleRegChecked={handleToggleRegChecked}
+            shopChecked={shopChecked} onToggleShopChecked={handleToggleShopChecked}
+            freeShop={freeShop} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop}
           />
         )}
         <nav className="tabs">
