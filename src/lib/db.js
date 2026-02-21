@@ -589,15 +589,11 @@ export async function togglePrepChecked(week, key, checked) {
 
 export async function fetchThumbnail(url) {
   try {
-    const base = import.meta.env.VITE_SUPABASE_URL
-    const key = import.meta.env.VITE_SUPABASE_ANON_KEY
-    const res = await fetch(`${base}/functions/v1/fetch-thumbnail`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'apikey': key },
-      body: JSON.stringify({ url }),
+    const { data, error } = await supabase.functions.invoke('fetch-thumbnail', {
+      body: { url },
     })
-    const { thumbnailUrl } = await res.json()
-    return thumbnailUrl || null
+    if (error) { console.error('fetchThumbnail', error); return null }
+    return data?.thumbnailUrl || null
   } catch (e) {
     console.error('fetchThumbnail', e)
     return null
