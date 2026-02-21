@@ -18,6 +18,7 @@ import {
   fetchFreeShop, addFreeShopItem as dbAddFreeShopItem, updateFreeShopItem as dbUpdateFreeShopItem,
   fetchPrepTasks, addPrepTask as dbAddPrepTask, updatePrepTask as dbUpdatePrepTask,
   fetchPrepChecked, togglePrepChecked as dbTogglePrepChecked,
+  fetchThumbnail,
   THIS_WEEK,
 } from './lib/db.js';
 
@@ -111,6 +112,7 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
   const [ePdfUrl, setEPdfUrl]   = useState(recipe.pdfUrl || "");
   const [eIngr,   setEIngr]   = useState(recipe.ingredients || []);
   const [eIngrInput, setEIngrInput] = useState("");
+  const [eThumbnailUrl, setEThumbnailUrl] = useState(recipe.thumbnailUrl || null);
 
   const toggleETag = t => setETags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t]);
   const addEIngr = val => {
@@ -133,6 +135,7 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
       pdfUrl:     ePdfUrl.trim() || undefined,
       tags:       eTags,
       ingredients: eIngr,
+      thumbnailUrl: eThumbnailUrl,
     });
     setEditing(false);
     onClose();
@@ -150,6 +153,7 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
     setETags([...recipe.tags]);
     setEIngr([...(recipe.ingredients || [])]);
     setEIngrInput("");
+    setEThumbnailUrl(recipe.thumbnailUrl || null);
     setEditing(true);
   };
 
@@ -263,7 +267,11 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
               </div>
               <div className="form-field">
                 <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <input className="form-input" placeholder="https://…" value={eUrl} onChange={e => setEUrl(e.target.value)}/>
+                <div style={{display:"flex", alignItems:"center", gap:8}}>
+                  <input className="form-input" style={{flex:1}} placeholder="https://…" value={eUrl} onChange={e => setEUrl(e.target.value)}
+                    onBlur={async () => { if (eUrl.trim()) { const t = await fetchThumbnail(eUrl.trim()); if (t) setEThumbnailUrl(t); }}}/>
+                  {eThumbnailUrl && <img src={eThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
+                </div>
               </div>
               <div className="form-field">
                 <label className="form-label">Category</label>
@@ -346,8 +354,17 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
 
 function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
   time, setTime, tags, setTags, ingredients, setIngredients, ingrInput, setIngrInput,
-  category, setCategory, customTags = [], customCategories = [] }) {
+  category, setCategory, customTags = [], customCategories = [],
+  thumbnailUrl, setThumbnailUrl }) {
 
+  const [thumbLoading, setThumbLoading] = useState(false);
+  const handleUrlBlur = async () => {
+    if (!url.trim() || !setThumbnailUrl) return;
+    setThumbLoading(true);
+    const thumb = await fetchThumbnail(url.trim());
+    if (thumb) setThumbnailUrl(thumb);
+    setThumbLoading(false);
+  };
   const toggleTag = t => setTags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t]);
   const addIngr = val => {
     const trimmed = val.trim().toLowerCase();
@@ -370,8 +387,12 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
       </div>
       <div className="form-field">
         <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-        <input className="form-input" placeholder="https://…" value={url}
-          onChange={e => setUrl(e.target.value)}/>
+        <div style={{display:"flex", alignItems:"center", gap:8}}>
+          <input className="form-input" style={{flex:1}} placeholder="https://…" value={url}
+            onChange={e => setUrl(e.target.value)} onBlur={handleUrlBlur}/>
+          {thumbLoading && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
+          {!thumbLoading && thumbnailUrl && <img src={thumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
+        </div>
       </div>
       <div className="form-field">
         <label className="form-label">Category</label>
@@ -443,6 +464,7 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
   const [tags,       setTags]       = useState(prefill.tags   || []);
   const [ingredients,setIngredients]= useState(prefill.ingredients || []);
   const [ingrInput,  setIngrInput]  = useState("");
+  const [thumbnailUrl, setThumbnailUrl] = useState(prefill.thumbnailUrl || null);
 
   const handleSave = () => {
     if (!title.trim()) return;
@@ -455,6 +477,7 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
       time: parseInt(time) || 30,
       tags,
       ingredients,
+      thumbnailUrl,
     });
     onClose();
   };
@@ -478,6 +501,7 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
             ingredients={ingredients} setIngredients={setIngredients}
             ingrInput={ingrInput}     setIngrInput={setIngrInput}
             customTags={customTags}   customCategories={customCategories}
+            thumbnailUrl={thumbnailUrl} setThumbnailUrl={setThumbnailUrl}
           />
         </div>
         <div className="sheet-footer">
@@ -663,7 +687,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
   const [newCategory, setNewCategory]   = useState("dinner");
   const [newTags, setNewTags]           = useState([]);
   const [newPrepNote, setNewPrepNote]   = useState("");
-
+  const [newThumbnailUrl, setNewThumbnailUrl] = useState(null);
 
 
   const [deductPrompt, setDeductPrompt] = useState(null);
@@ -711,6 +735,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
       time: parseInt(newTime) || 30,
       ingredients: newIngredients,
       prepNote: newPrepNote.trim() || undefined,
+      thumbnailUrl: newThumbnailUrl,
       _unsaved: !saveToLibrary,
     };
     if (saveToLibrary) onAddRecipe(recipe);
@@ -894,8 +919,12 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
               </div>
               <div className="form-field">
                 <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <input className="form-input" placeholder="https://…" value={newUrl}
-                  onChange={e => setNewUrl(e.target.value)}/>
+                <div style={{display:"flex", alignItems:"center", gap:8}}>
+                  <input className="form-input" style={{flex:1}} placeholder="https://…" value={newUrl}
+                    onChange={e => setNewUrl(e.target.value)}
+                    onBlur={async () => { if (newUrl.trim()) { const t = await fetchThumbnail(newUrl.trim()); if (t) setNewThumbnailUrl(t); }}}/>
+                  {newThumbnailUrl && <img src={newThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
+                </div>
               </div>
               <div className="form-field">
                 <label className="form-label">Cook time (min)</label>
@@ -1005,6 +1034,7 @@ function DayCard({ d, today, onClick, onDetail, readyBy }) {
   const recipeLink = d.recipe.pdfUrl || d.recipe.url || null;
   return (
     <div className={"day-card" + (today ? " today" : "")} onClick={() => onDetail(d.recipe)}>
+      {d.recipe.thumbnailUrl && <img className="day-card-thumb" src={d.recipe.thumbnailUrl} alt="" />}
       <button className="day-card-swap" title="Change recipe"
         onClick={e => { e.stopPropagation(); onClick(); }}>⇄</button>
       <div className="day-name">{d.day}</div>
@@ -1613,10 +1643,15 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
               {!collapsed && (
                 <div className="rlist">
                   {sectionRecipes.map(r => (
-                    <div key={r.id} className="rlistitem" onClick={() => setDetail(r)}>
-                      <div className="rl-title">{r.title}</div>
-                      <div className="rl-meta">{r.source} · {r.time} min</div>
-                      {r.tags?.length > 0 && <div className="rl-tags"><Tags tags={r.tags}/></div>}
+                    <div key={r.id} className="rcard" onClick={() => setDetail(r)}>
+                      {r.thumbnailUrl
+                        ? <img className="rcard-thumb" src={r.thumbnailUrl} alt="" />
+                        : <div className="rcard-placeholder">🍽</div>}
+                      <div className="rcard-body">
+                        <div className="rl-title">{r.title}</div>
+                        <div className="rl-meta">{r.source} · {r.time} min</div>
+                        {r.tags?.length > 0 && <div className="rl-tags"><Tags tags={r.tags}/></div>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1795,9 +1830,36 @@ function InventoryView({ week, recipes, staples, onAddStaple, onCycleStaple, onR
   );
 }
 
-function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCustomTag, customCategories, onAddCustomCategory, onRemoveCustomCategory }) {
+function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCustomTag, customCategories, onAddCustomCategory, onRemoveCustomCategory, recipes, setRecipes }) {
   const [newTag, setNewTag]       = useState("");
   const [newCat, setNewCat]       = useState("");
+  const [thumbMsg, setThumbMsg]   = useState(null);
+  const [thumbBusy, setThumbBusy] = useState(false);
+
+  const handleFetchThumbnails = async () => {
+    const missing = recipes.filter(r => r.url && !r.thumbnailUrl);
+    if (!missing.length) {
+      setThumbMsg("All thumbnails up to date");
+      setTimeout(() => setThumbMsg(null), 2000);
+      return;
+    }
+    setThumbBusy(true);
+    setThumbMsg(`Fetching ${missing.length} thumbnail${missing.length > 1 ? "s" : ""}…`);
+    let remaining = missing.length;
+    await Promise.all(missing.map(async (r) => {
+      const thumb = await fetchThumbnail(r.url);
+      if (thumb) {
+        const updated = { ...r, thumbnailUrl: thumb };
+        setRecipes(prev => prev.map(p => p.id === r.id ? updated : p));
+        dbUpdateRecipe(r.id, updated);
+      }
+      remaining--;
+      if (remaining > 0) setThumbMsg(`Fetching ${remaining} thumbnail${remaining > 1 ? "s" : ""}…`);
+    }));
+    setThumbBusy(false);
+    setThumbMsg("Done");
+    setTimeout(() => setThumbMsg(null), 2000);
+  };
 
   return (
     <div className="tab-section">
@@ -1889,6 +1951,14 @@ function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCust
           <button className="pantry-add-btn" disabled={!newCat.trim()}
             onClick={() => { const builtins = ["dinner","breakfast","sweets"]; const c = newCat.trim(); if (c && !builtins.includes(c.toLowerCase()) && !customCategories.includes(c)) { onAddCustomCategory(c); setNewCat(""); }}}>Add</button>
         </div>
+      </div>
+
+      <div className="pantry-section-label" style={{marginTop:24}}>Thumbnails</div>
+      <div className="inv-card" style={{padding:"12px 14px", display:"flex", alignItems:"center", gap:10}}>
+        <button className="btn btn-primary" style={{fontSize:12, padding:"8px 14px"}} disabled={thumbBusy} onClick={handleFetchThumbnails}>
+          Fetch missing thumbnails
+        </button>
+        {thumbMsg && <span style={{fontSize:12, color:"var(--ink3)"}}>{thumbMsg}</span>}
       </div>
     </div>
   );
@@ -2240,7 +2310,7 @@ export default function App() {
       onAdjustFreezerQty={handleAdjustFreezerQty} />,
     recipes: <RecipesView recipes={recipes} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} customTags={customTags} customCategories={customCategories} />,
     pantry:  <InventoryView week={week} recipes={recipes} staples={staples} onAddStaple={handleAddStaple} onCycleStaple={handleCycleStaple} onRemoveStaple={handleRemoveStaple} regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular} fridge={fridge} onAddFridge={handleAddFridge} onCycleFridge={handleCycleFridge} onRemoveFridge={handleRemoveFridge} freezer={freezer} onAddFreezer={handleAddFreezer} onAdjustFreezerQty={handleAdjustFreezerQty} onRemoveFreezer={handleRemoveFreezer} />,
-    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} />,
+    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} recipes={recipes} setRecipes={setRecipes} />,
   };
   return (
     <>

@@ -30,6 +30,7 @@ export function toAppRecipe(row) {
     prepNote:    row.prep_note || undefined,
     pdfUrl:      row.pdf_url || undefined,
     ingredients: row.ingredients || [],
+    thumbnailUrl: row.thumbnail_url || null,
   }
 }
 
@@ -45,6 +46,7 @@ function toDbRecipe(recipe) {
     prep_note:   recipe.prepNote || null,
     pdf_url:     recipe.pdfUrl || null,
     ingredients: recipe.ingredients || [],
+    thumbnail_url: recipe.thumbnailUrl || null,
   }
 }
 
@@ -580,5 +582,24 @@ export async function togglePrepChecked(week, key, checked) {
       .eq('week_start', week)
       .eq('key', key)
     if (error) console.error('togglePrepChecked', error)
+  }
+}
+
+// ── Thumbnail fetch ──────────────────────────────────────────────────────────
+
+export async function fetchThumbnail(url) {
+  try {
+    const base = import.meta.env.VITE_SUPABASE_URL
+    const key = import.meta.env.VITE_SUPABASE_ANON_KEY
+    const res = await fetch(`${base}/functions/v1/fetch-thumbnail`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}`, 'apikey': key },
+      body: JSON.stringify({ url }),
+    })
+    const { thumbnailUrl } = await res.json()
+    return thumbnailUrl || null
+  } catch (e) {
+    console.error('fetchThumbnail', e)
+    return null
   }
 }
