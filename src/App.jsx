@@ -687,18 +687,12 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
   regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters, shopSectionKeywords }) {
 
   const [freeInput, setFreeInput] = useState("");
-  const [regularInput, setRegularInput] = useState("");
   const [unfilteredIds, setUnfilteredIds] = useState(new Set());
   const [dismissedIds, setDismissedIds] = useState(new Set());
   const [popoverId, setPopoverId] = useState(null);
 
   const toggleReg  = id => onToggleRegChecked(id);
   const removeReg  = id => onRemoveRegular(id);
-  const addReg     = val => {
-    const t = val.trim().toLowerCase();
-    if (t && !regulars.find(r => r.name === t)) onAddRegular(t);
-    setRegularInput("");
-  };
   const toggleShop    = id => onToggleShopChecked(id);
   const toggleFreeShop = id => onToggleFreeShop(id);
   const addFreeItem   = () => {
@@ -747,13 +741,6 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
   // Duplicate detection among main items
   const dupMap = findDuplicates(mainItems);
 
-  const regsUnchecked = regulars.filter(r => !regChecked[r.id]);
-  const regsChecked   = regulars.filter(r =>  regChecked[r.id]);
-  const recipeUnchecked = mainItems.filter(i => !shopChecked[i.id] && !i.done);
-  const recipeChecked   = mainItems.filter(i =>  shopChecked[i.id] ||  i.done);
-
-  const totalUnchecked = regsUnchecked.length + recipeUnchecked.length;
-
   const unfilterItem = (item) => {
     setUnfilteredIds(prev => new Set([...prev, item.id]));
   };
@@ -761,22 +748,52 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
     setUnfilteredIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
   };
 
-  const renderRecipeRow = (item, checked) => {
-    const isDup = dupMap.has(item.id);
-    const wasUnfiltered = unfilteredIds.has(item.id);
+  // Build unified list: regulars + recipe items + free-form, all with sourceLabel
+  const regularItems = regulars.map(r => ({
+    id: "reg:" + r.id, text: r.name, sourceLabel: "every week",
+    _isReg: true, _regId: r.id, _checked: !!regChecked[r.id],
+  }));
+  const recipeAllItems = mainItems.map(item => ({
+    ...item,
+    sourceLabel: item.source === "restock" ? "pantry restock" : item.done !== undefined ? "added" : item.recipeName || "recipe",
+    _isReg: false, _checked: !!(shopChecked[item.id] || item.done),
+  }));
+  const allItems = [...regularItems, ...recipeAllItems];
+  const totalUnchecked = allItems.filter(i => !i._checked).length;
+
+  // Group by supermarket section
+  const grouped = {};
+  allItems.forEach(item => {
+    const sec = getSectionForIngredient(item.text, shopSectionKeywords);
+    if (!grouped[sec]) grouped[sec] = [];
+    grouped[sec].push(item);
+  });
+
+  const renderRow = (item) => {
+    const checked = item._checked;
+    const isDup = !item._isReg && dupMap.has(item.id);
+    const wasUnfiltered = !item._isReg && unfilteredIds.has(item.id);
+    const toggle = () => {
+      if (item._isReg) toggleReg(item._regId);
+      else if (item.done !== undefined) toggleFreeShop(item.id);
+      else toggleShop(item.id);
+    };
     return (
       <div key={item.id} className={"shop-col-item" + (checked ? " done-item" : "") + (isDup && !checked ? " duplicate-item" : "")}
            style={checked ? {textDecoration:"line-through", position:"relative"} : {position:"relative"}}
            onClick={() => { if (isDup && !checked) setPopoverId(popoverId === item.id ? null : item.id); }}>
-        <input type="checkbox" checked={!!checked} onChange={() => item.done !== undefined ? toggleFreeShop(item.id) : toggleShop(item.id)}/>
+        <input type="checkbox" checked={checked} onChange={toggle}/>
         <div style={{flex:1,minWidth:0}}>
           <div className="shop-col-text">{item.text}</div>
-          {item.source && <div className="shop-col-source">{item.recipeName || item.source}</div>}
+          <div className="shop-col-source">{item.sourceLabel}</div>
         </div>
         {wasUnfiltered && !checked && (
           <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }} title="Move back to filtered">↩</button>
         )}
-        <button className="shop-item-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>
+        {item._isReg
+          ? <button className="pantry-row-remove" style={{opacity:0.25,fontSize:13}} onClick={e=>{e.stopPropagation();removeReg(item._regId);}}>×</button>
+          : <button className="shop-item-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>
+        }
         {popoverId === item.id && dupMap.get(item.id) && (
           <span className="dup-popover" onClick={e => e.stopPropagation()}>
             Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
@@ -798,75 +815,34 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
         </div>
 
         <div className="sheet-body" style={{padding:0}}>
-
-          {/* Weekly regulars */}
-          <div className="shop-sheet-group-label">Every week</div>
-          <div className="shop-col-grid">
-            {regsUnchecked.map(r => (
-              <div key={r.id} className="shop-col-item">
-                <input type="checkbox" checked={false} onChange={() => toggleReg(r.id)}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div className="shop-col-text">{r.name}</div>
-                </div>
-                <button className="pantry-row-remove" style={{opacity:0.25,fontSize:13}} onClick={e=>{e.stopPropagation();removeReg(r.id);}}>×</button>
-              </div>
-            ))}
-            {regsChecked.map(r => (
-              <div key={r.id} className="shop-col-item done-item">
-                <input type="checkbox" checked={true} onChange={() => toggleReg(r.id)}/>
-                <div style={{flex:1,minWidth:0,textDecoration:"line-through"}}>
-                  <div className="shop-col-text">{r.name}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div style={{padding:"6px 12px 10px", borderBottom:"1px solid var(--border2)", display:"flex", gap:8}}>
-            <input className="pantry-add-input" placeholder="Add to weekly regulars…" value={regularInput}
-              style={{fontSize:11}}
-              onChange={e => setRegularInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") addReg(regularInput); }}/>
-            <button className="pantry-add-btn" disabled={!regularInput.trim()} onClick={() => addReg(regularInput)} style={{fontSize:11,padding:"6px 10px"}}>Add</button>
-          </div>
-
-          {/* This week — grouped by supermarket section */}
-          {recipeUnchecked.length === 0 && recipeChecked.length === 0 && freeShop.length === 0 && filteredItems.length === 0 ? (
+          {allItems.length === 0 && filteredItems.length === 0 ? (
             <div style={{padding:"10px 20px", color:"var(--ink4)", fontSize:12, fontStyle:"italic"}}>
               Plan dinners to auto-populate ingredients here.
             </div>
           ) : (
-            (() => {
-              const allItems = [...recipeUnchecked.map(i => ({...i, _checked: false})), ...recipeChecked.map(i => ({...i, _checked: true}))];
-              const grouped = {};
-              allItems.forEach(item => {
-                const sec = getSectionForIngredient(item.text, shopSectionKeywords);
-                if (!grouped[sec]) grouped[sec] = [];
-                grouped[sec].push(item);
-              });
-              return SHOP_SECTIONS.filter(s => grouped[s.id]?.length).map(s => (
+            SHOP_SECTIONS.filter(s => grouped[s.id]?.length).map(s => {
+              const items = grouped[s.id];
+              return (
                 <div key={s.id}>
                   <div className="shop-section-header">{s.label}</div>
-                  <div className="shop-col-grid">
-                    {grouped[s.id].filter(i => !i._checked).map(item => renderRecipeRow(item, false))}
-                    {grouped[s.id].filter(i => i._checked).map(item => renderRecipeRow(item, true))}
-                  </div>
+                  {items.filter(i => !i._checked).map(renderRow)}
+                  {items.filter(i => i._checked).map(renderRow)}
                 </div>
-              ));
-            })()
+              );
+            })
           )}
           {filteredItems.length > 0 && (
             <details className="filtered-section" style={{padding:"0 12px 6px"}}>
               <summary className="filtered-summary">Filtered out ({filteredItems.length})</summary>
               <div className="filtered-note">These match common staples — check your pantry</div>
-              <div className="shop-col-grid">
-                {filteredItems.map(item => (
-                  <div key={item.id} className="shop-col-item" style={{opacity:0.45, fontStyle:"italic", cursor:"pointer"}}
-                    onClick={() => unfilterItem(item)}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div className="shop-col-text">{item.text}</div>
-                    </div>
+              {filteredItems.map(item => (
+                <div key={item.id} className="shop-col-item" style={{opacity:0.45, fontStyle:"italic", cursor:"pointer"}}
+                  onClick={() => unfilterItem(item)}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div className="shop-col-text">{item.text}</div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </details>
           )}
           <div style={{padding:"6px 12px 10px", display:"flex", gap:8}}>
@@ -1801,72 +1777,86 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
     setUnfilteredIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
   };
 
+  // Build unified item list: regulars + recipe items + free-form — all get a sourceLabel
+  const regularItems = regulars.map(r => ({
+    id: "reg:" + r.id, text: r.name, sourceLabel: "every week",
+    _isReg: true, _regId: r.id, _checked: !!regChecked[r.id],
+  }));
+  const recipeMainItems = mainItems.map(item => ({
+    ...item,
+    sourceLabel: item.source === "restock" ? "pantry restock" : item.done !== undefined ? "added" : item.recipeName || "recipe",
+    _isReg: false, _checked: !!(shopChecked[item.id] || item.done),
+  }));
+  const allItems = [...regularItems, ...recipeMainItems];
+
+  // Group all items by supermarket section
+  const grouped = {};
+  allItems.forEach(item => {
+    const sec = getSectionForIngredient(item.text, shopSectionKeywords);
+    if (!grouped[sec]) grouped[sec] = [];
+    grouped[sec].push(item);
+  });
+
+  const renderRow = (item) => {
+    const isDup = !item._isReg && dupMap.has(item.id);
+    const wasUnfiltered = !item._isReg && unfilteredIds.has(item.id);
+    const checked = item._checked;
+    const toggle = () => {
+      if (item._isReg) onToggleRegChecked(item._regId);
+      else toggleItem(item);
+    };
+    return (
+      <div key={item.id} className={"week-shop-row" + (checked ? " done" : "") + (isDup && !checked ? " duplicate-item" : "")}
+        onClick={(e) => {
+          if (isDup && !checked) { e.stopPropagation(); setPopoverId(popoverId === item.id ? null : item.id); }
+          else toggle();
+        }}>
+        <input type="checkbox" checked={checked} onChange={toggle} onClick={e => e.stopPropagation()}/>
+        <div style={{flex:1, minWidth:0}}>
+          <div className="week-shop-row-text">{item.text}</div>
+          <div className="week-shop-row-source">{item.sourceLabel}</div>
+        </div>
+        {wasUnfiltered && !checked && (
+          <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }}>↩</button>
+        )}
+        {!item._isReg && <button className="shop-item-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>}
+        {popoverId === item.id && dupMap.get(item.id) && (
+          <span className="dup-popover" onClick={e => e.stopPropagation()}>
+            Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="week-shop-section" onClick={() => popoverId && setPopoverId(null)}>
-      {regulars.length > 0 && <>
-        <div className="week-shop-group-label">Every week</div>
-        <div className="week-shop-pills">
-          {regulars.map(r => (
-            <span key={r.id} className={"shop-pill" + (regChecked[r.id] ? " done" : "")}
-              onClick={() => onToggleRegChecked(r.id)}>
-              {r.name}
-            </span>
-          ))}
-        </div>
-      </>}
-      {mainItems.length > 0 && (() => {
-        const grouped = {};
-        mainItems.forEach(item => {
-          const sec = getSectionForIngredient(item.text, shopSectionKeywords);
-          if (!grouped[sec]) grouped[sec] = [];
-          grouped[sec].push(item);
-        });
-        return SHOP_SECTIONS.filter(s => grouped[s.id]?.length).map(s => (
+      {SHOP_SECTIONS.filter(s => grouped[s.id]?.length).map(s => {
+        const items = grouped[s.id];
+        const unchecked = items.filter(i => !i._checked);
+        const checked = items.filter(i => i._checked);
+        return (
           <div key={s.id}>
             <div className="shop-section-header">{s.label}</div>
-            <div className="week-shop-pills">
-              {grouped[s.id].map(item => {
-                const isDup = dupMap.has(item.id);
-                const isChecked = shopChecked[item.id] || item.done;
-                const wasUnfiltered = unfilteredIds.has(item.id);
-                return (
-                  <span key={item.id} style={{position:"relative"}}>
-                    <span className={"shop-pill" + (isDup ? " duplicate" : "") + (isChecked ? " done" : "")}
-                      onClick={(e) => {
-                        if (isDup && !isChecked) { e.stopPropagation(); setPopoverId(popoverId === item.id ? null : item.id); }
-                        else toggleItem(item);
-                      }}>
-                      {item.text}
-                      {wasUnfiltered && !isChecked && <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }}>↩</button>}
-                      <button className="pill-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>
-                    </span>
-                    {popoverId === item.id && dupMap.get(item.id) && (
-                      <span className="dup-popover" onClick={e => e.stopPropagation()}>
-                        Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
-                        <br/><span style={{fontSize:10, color:"var(--ink4)"}}>Tap pill again to check off</span>
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
-            </div>
+            {unchecked.map(renderRow)}
+            {checked.map(renderRow)}
           </div>
-        ));
-      })()}
+        );
+      })}
       {filteredItems.length > 0 && (
         <details className="filtered-section">
           <summary className="filtered-summary">Filtered out ({filteredItems.length})</summary>
           <div className="filtered-note">These match common staples — check your pantry</div>
-          <div className="week-shop-pills">
-            {filteredItems.map(item => (
-              <span key={item.id} className="shop-pill filtered" onClick={() => unfilterItem(item)}>
-                {item.text}
-              </span>
-            ))}
-          </div>
+          {filteredItems.map(item => (
+            <div key={item.id} className="week-shop-row filtered" onClick={() => unfilterItem(item)}>
+              <div style={{flex:1, minWidth:0}}>
+                <div className="week-shop-row-text">{item.text}</div>
+              </div>
+            </div>
+          ))}
         </details>
       )}
-      {regulars.length === 0 && mainItems.length === 0 && filteredItems.length === 0 && (
+      {allItems.length === 0 && filteredItems.length === 0 && (
         <div className="week-shop-empty">Plan dinners to populate your list.</div>
       )}
       <div style={{display:"flex", gap:8, marginBottom:10}}>

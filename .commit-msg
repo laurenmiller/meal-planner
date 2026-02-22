@@ -1,1 +1,1 @@
-Add shopping section keyword editor in Prefs; move ingredient-to-section mapping to Supabase with editable keywords per section; organize shopping list by supermarket aisles
+Refactor shopping list: line-per-item checkboxes replacing pills, merge weekly regulars into supermarket sections, show item source (recipe name, pantry restock, every week, added); add shopping section keyword editor in Prefs with Supabase persistence
