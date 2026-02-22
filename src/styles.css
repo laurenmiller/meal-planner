@@ -407,6 +407,20 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .sheet-overlay:has(.detail-overlay-panel) { align-items: stretch; }
 .detail-overlay-panel { width: 100%; max-width: 430px; margin: 0 auto; background: var(--surface); }
 
+/* Fullscreen detail (week plan context) */
+.detail-fullscreen {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--surface);
+  display: flex; flex-direction: column;
+  animation: fadeIn 0.18s ease;
+}
+@media (min-width: 768px) {
+  .detail-fullscreen { left: 200px; }
+}
+@media (min-width: 1400px) {
+  .detail-fullscreen { left: 220px; }
+}
+
 /* ── Recipes tab ── */
 .tab-section { padding: 18px; }
 .view-toggle { display: flex; background: var(--surface2); border-radius: 8px; padding: 3px; margin-bottom: 14px; border: 1px solid var(--border2); }

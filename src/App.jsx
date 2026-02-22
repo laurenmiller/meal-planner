@@ -286,6 +286,7 @@ function RecipeDetailView({ recipe, onClose, onSave, onDelete, onRemoveFromPlan,
         </div>
 
         <div className="detail-footer">
+          {source === "plan" && <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>← Back to week</button>}
           <button className="sheet-btn sheet-btn-primary" style={{flex:1}} onClick={startEdit}>Edit</button>
           {r.url && <button className="sheet-btn sheet-btn-cancel" disabled={refreshing} onClick={handleRefresh}>{refreshing ? "Refreshing…" : "↻ Refresh"}</button>}
           {source === "plan"
@@ -2028,7 +2029,6 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
         <div className="week-scroll">
           {week.map((d, i) => {
             const isToday = i === todayIndex;
-            const dateNum = dayDates[i].getDate();
             return (
               <div key={i} className={"day-col" + (dropTarget === i ? " drop-target" : "")}
                 data-day-index={i}
@@ -2037,7 +2037,6 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
                 onDrop={e => { e.preventDefault(); handleDrop(i); }}>
                 <div className={"day-col-header" + (isToday ? " today" : "")}>
                   <span className="day-col-name">{d.day}</span>
-                  <span className={"day-col-num" + (isToday ? " today" : "")}>{dateNum}</span>
                 </div>
                 {d.items.length === 0 && (
                   <div className="day-empty-card" onClick={() => openSheet(i)}>
@@ -2223,24 +2222,22 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
         </div>
       )}
       {weekDetail?.recipe && (
-        <div className="sheet-overlay">
-          <div className="detail-overlay-panel" onClick={e => e.stopPropagation()}>
-            <RecipeDetailView
-              recipe={weekDetail.recipe}
-              source="plan"
-              itemId={weekDetail.itemId}
-              onClose={() => setWeekDetail(null)}
-              onSave={updated => {
-                onUpdateRecipe(updated);
-                setWeekDetail({ ...weekDetail, recipe: updated });
-              }}
-              onRemoveFromPlan={() => {
-                onRemoveItem(weekDetail.itemId);
-                setWeekDetail(null);
-              }}
-              customTags={customTags} customCategories={customCategories}
-            />
-          </div>
+        <div className="detail-fullscreen">
+          <RecipeDetailView
+            recipe={weekDetail.recipe}
+            source="plan"
+            itemId={weekDetail.itemId}
+            onClose={() => setWeekDetail(null)}
+            onSave={updated => {
+              onUpdateRecipe(updated);
+              setWeekDetail({ ...weekDetail, recipe: updated });
+            }}
+            onRemoveFromPlan={() => {
+              onRemoveItem(weekDetail.itemId);
+              setWeekDetail(null);
+            }}
+            customTags={customTags} customCategories={customCategories}
+          />
         </div>
       )}
       {batchDetail && (
