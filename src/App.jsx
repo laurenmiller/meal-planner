@@ -1962,6 +1962,24 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
   const vegMet     = vegCount  >= goals.vegMin;
   const allMet     = fishMet && vegMet;
 
+  if (weekDetail?.recipe) return (
+    <RecipeDetailView
+      recipe={weekDetail.recipe}
+      source="plan"
+      itemId={weekDetail.itemId}
+      onClose={() => setWeekDetail(null)}
+      onSave={updated => {
+        onUpdateRecipe(updated);
+        setWeekDetail({ ...weekDetail, recipe: updated });
+      }}
+      onRemoveFromPlan={() => {
+        onRemoveItem(weekDetail.itemId);
+        setWeekDetail(null);
+      }}
+      customTags={customTags} customCategories={customCategories}
+    />
+  );
+
   return (
     <div>
       <div className="page-header">
@@ -2237,25 +2255,6 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
               </button>
             </div>
           </div>
-        </div>
-      )}
-      {weekDetail?.recipe && (
-        <div className="detail-fullscreen">
-          <RecipeDetailView
-            recipe={weekDetail.recipe}
-            source="plan"
-            itemId={weekDetail.itemId}
-            onClose={() => setWeekDetail(null)}
-            onSave={updated => {
-              onUpdateRecipe(updated);
-              setWeekDetail({ ...weekDetail, recipe: updated });
-            }}
-            onRemoveFromPlan={() => {
-              onRemoveItem(weekDetail.itemId);
-              setWeekDetail(null);
-            }}
-            customTags={customTags} customCategories={customCategories}
-          />
         </div>
       )}
       {batchDetail && (
