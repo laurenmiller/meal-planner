@@ -1172,7 +1172,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
             Recipes
           </button>
           <button className={"sheet-mode-btn" + (mode==="url" ? " active" : "")} onClick={() => setMode("url")}>
-            Add URL
+            Add from web
           </button>
           <button className={"sheet-mode-btn" + (mode==="note" ? " active" : "")} onClick={() => setMode("note")}>
             Note
@@ -1240,101 +1240,18 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
           )}
 
           {mode === "url" && (
-            <div style={{paddingBottom:8}}>
-              <div className="form-field">
-                <label className="form-label">URL</label>
-                <div style={{display:"flex", alignItems:"center", gap:8}}>
-                  <input className="form-input" style={{flex:1}} placeholder="https://…" value={newUrl}
-                    autoFocus
-                    onChange={e => handleNewUrlChange(e.target.value)}
-                    onBlur={handleNewUrlBlur}/>
-                  {fetchLoading && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
-                  {!fetchLoading && newThumbnailUrl && <img src={newThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
-                </div>
-                {scraped && <div style={{fontSize:10, color:"var(--sage)", marginTop:3, fontStyle:"italic"}}>Fetched from page</div>}
+            <div style={{padding:"8px 0", display:"flex", flexDirection:"column", gap:6}}>
+              <div style={{display:"flex", gap:6, alignItems:"center", flexWrap:"wrap"}}>
+                <input className="form-input" placeholder="Recipe name" value={newTitle} autoFocus style={{flex:"2 1 140px"}}
+                  onChange={e => setNewTitle(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleAddNew()}/>
+                <input className="form-input" placeholder="URL (optional)" value={newUrl} style={{flex:"3 1 180px"}}
+                  onChange={e => handleNewUrlChange(e.target.value)}
+                  onBlur={handleNewUrlBlur}
+                  onKeyDown={e => e.key === "Enter" && handleAddNew()}/>
               </div>
-              <div className="form-field">
-                <label className="form-label">Title</label>
-                <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}/>
-              </div>
-              <div className="form-field">
-                <label className="form-label">Source</label>
-                <input className="form-input" placeholder="e.g. NYT Cooking, Smitten Kitchen" value={newSource}
-                  onChange={e => setNewSource(e.target.value)}/>
-              </div>
-              <div className="form-field">
-                <label className="form-label">Cook time (min)</label>
-                <input className="form-input" type="number" value={newTime}
-                  onChange={e => setNewTime(e.target.value)}/>
-              </div>
-              <div className="form-field">
-                <label className="form-label">Key ingredients <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <div className="ingredient-tags" onClick={e => e.currentTarget.querySelector("input")?.focus()}>
-                  {newIngredients.map((ing, i) => (
-                    <span key={i} className="ingredient-tag">
-                      <span style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); setNewIngrInput(ing); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>{ing}</span>
-                      <button className="ingredient-tag-remove" onClick={e => { e.stopPropagation(); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>×</button>
-                    </span>
-                  ))}
-                  <input className="ingredient-tag-input"
-                    placeholder={newIngredients.length === 0 ? "e.g. salmon fillet…" : "add more…"}
-                    value={newIngrInput}
-                    onChange={e => setNewIngrInput(e.target.value)}
-                    onKeyDown={e => {
-                      const v = newIngrInput.trim().toLowerCase();
-                      if ((e.key === "Enter" || e.key === ",") && v) {
-                        e.preventDefault();
-                        if (!newIngredients.includes(v)) setNewIngr(ii => [...ii, v]);
-                        setNewIngrInput("");
-                      } else if (e.key === "Backspace" && !newIngrInput && newIngredients.length > 0) {
-                        setNewIngr(ii => ii.slice(0,-1));
-                      }
-                    }}
-                    onBlur={() => { const v = newIngrInput.trim().toLowerCase(); if (v && !newIngredients.includes(v)) { setNewIngr(ii => [...ii, v]); setNewIngrInput(""); }}}
-                  />
-                </div>
-                <div className="ingredient-tag-hint">Enter or comma to add</div>
-              </div>
-              <div className="form-field">
-                <label className="form-label">Prep note <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <input className="form-input" placeholder="e.g. Marinate overnight" value={newPrepNote}
-                  onChange={e => setNewPrepNote(e.target.value)}/>
-              </div>
-              <div style={{marginTop:12, borderTop:"1px solid var(--border2)", paddingTop:12}}>
-                <label style={{display:"flex", alignItems:"center", gap:8, fontSize:12, color:"var(--ink3)", cursor:"pointer", marginBottom: saveToLibrary ? 12 : 0}}>
-                  <input type="checkbox" checked={saveToLibrary} onChange={e => setSaveToLibrary(e.target.checked)}
-                    style={{accentColor:"var(--accent)"}}/>
-                  <span>Save to recipe library</span>
-                </label>
-                {saveToLibrary && (
-                  <div>
-                    <div className="form-field">
-                      <label className="form-label">Category</label>
-                      <div className="cat-select">
-                        {[["dinner","Dinner"],["breakfast","Breakfast & Snacks"],["sweets","Sweets"],...customCategories.map(c=>[c,c])].map(([k,l]) => (
-                          <button key={k} type="button"
-                            className={"cat-btn" + (newCategory === k ? " active" : "")}
-                            onClick={() => setNewCategory(k)}>
-                            {l}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="form-field">
-                      <label className="form-label">Tags</label>
-                      <div className="tag-toggle-row">
-                        {["fish","vegetarian",...customTags].map(t => (
-                          <button key={t} className={"tag-toggle" + (newTags.includes(t) ? " on" : "")}
-                            onClick={() => setNewTags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t])}>
-                            {t === "fish" ? "🐟 Fish" : t === "vegetarian" ? "🌿 Veg" : t}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {fetchLoading && <span style={{fontSize:11, color:"var(--ink4)"}}>fetching…</span>}
+              {scraped && <div style={{fontSize:10, color:"var(--sage)", fontStyle:"italic"}}>Fetched from page</div>}
             </div>
           )}
         </div>

@@ -691,10 +691,10 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
     margin-left: 200px;
   }
 
-  /* Week: columns fill available space on desktop, no horizontal scroll */
-  .week-scroll { overflow-x: visible; flex-wrap: wrap; }
+  /* Week: 7 equal columns filling available width on desktop */
+  .week-scroll { overflow-x: visible; }
   .week-scroll-fade { display: none; }
-  .day-col { flex: 1 1 140px; min-width: 0; }
+  .day-col { flex: 1 1 0; min-width: 0; max-width: calc((100% - 60px) / 7); }
 
   /* Recipe library: fixed-size tiles, auto-fill */
   .rlist {
