@@ -2312,7 +2312,8 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
 
 // ── Recipes View ──────────────────────────────────────────────────────────────
 
-function RadarDetailSheet({ item, onClose, onPromote, onPlan }) {
+function RadarDetailSheet({ item, onClose, onPromote, onPlan, onChangeCategory, customCategories = [] }) {
+  const cats = [{k:"dinner",l:"Dinner"},{k:"breakfast",l:"Breakfast"},{k:"sweets",l:"Sweets"},...customCategories.map(c=>({k:c,l:c}))];
   return (
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
@@ -2332,7 +2333,16 @@ function RadarDetailSheet({ item, onClose, onPromote, onPlan }) {
               <span className="detail-link-arrow">›</span>
             </a>
           )}
-          <div className="radar-sheet-actions" style={{marginTop: item.url ? 16 : 0}}>
+          <div style={{marginTop: item.url ? 16 : 0}}>
+            <div className="form-label">Category</div>
+            <div className="cat-select">
+              {cats.map(c => (
+                <button key={c.k} className={"cat-btn" + ((item.category || "dinner") === c.k ? " active" : "")} style={{fontSize:11, padding:"4px 10px"}}
+                  onClick={() => onChangeCategory(c.k)}>{c.l}</button>
+              ))}
+            </div>
+          </div>
+          <div className="radar-sheet-actions" style={{marginTop: 16}}>
             <button className="sheet-btn sheet-btn-primary" onClick={onPromote}>
               Add to recipe library
             </button>
@@ -2512,6 +2522,8 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
           item={radarDetail}
           onClose={() => setRadarDetail(null)}
           onPromote={() => { onPromoteRadar(radarDetail.id); setRadarDetail(null); }}
+          customCategories={customCategories}
+          onChangeCategory={(cat) => { const updated = { ...radarDetail, category: cat }; onUpdateRecipe(updated); setRadarDetail(updated); }}
         />
       )}
       {adding && (
