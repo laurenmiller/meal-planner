@@ -111,6 +111,16 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .shop-pill { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); font-size: 11px; color: var(--ink2); cursor: pointer; transition: all 0.12s; user-select: none; }
 .shop-pill:hover { border-color: var(--ink4); }
 .shop-pill.done { background: transparent; border-color: var(--border2); color: var(--ink4); text-decoration: line-through; opacity: 0.55; }
+.shop-pill.duplicate { border-color: var(--gold-light); background: var(--gold-pale); color: var(--gold); }
+.shop-pill.duplicate.done { border-color: var(--border2); background: transparent; color: var(--ink4); }
+.shop-pill.filtered { opacity: 0.45; font-style: italic; }
+.pill-refilter { background: none; border: none; padding: 0 0 0 4px; margin: 0; font-size: 11px; color: var(--ink4); cursor: pointer; opacity: 0.6; line-height: 1; }
+.pill-refilter:hover { opacity: 1; }
+.filtered-section { margin-top: 6px; }
+.filtered-summary { font-size: 11px; color: var(--ink4); cursor: pointer; user-select: none; }
+.filtered-note { font-size: 10px; color: var(--ink4); font-style: italic; margin: 4px 0 6px; }
+.dup-popover { position: absolute; background: var(--surface); border: 1px solid var(--gold-light); border-radius: 8px; padding: 6px 10px; font-size: 11px; color: var(--ink2); box-shadow: 0 2px 8px rgba(0,0,0,0.10); z-index: 100; white-space: nowrap; top: 100%; left: 0; margin-top: 4px; }
+.shop-col-item.duplicate-item { background: var(--gold-pale); border-left: 2px solid var(--gold-light); }
 .week-shop-empty { font-size: 12px; color: var(--ink4); font-style: italic; padding: 6px 0 10px; }
 
 /* ── Batch cards ── */

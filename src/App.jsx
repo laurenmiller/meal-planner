@@ -13,6 +13,7 @@ import {
   fetchPrefs, updatePrefs as dbUpdatePrefs,
   fetchCustomTags, addCustomTag as dbAddCustomTag, removeCustomTag as dbRemoveCustomTag,
   fetchCustomCategories, addCustomCategory as dbAddCustomCategory, removeCustomCategory as dbRemoveCustomCategory,
+  fetchShopFilters, addShopFilter as dbAddShopFilter, removeShopFilter as dbRemoveShopFilter,
   fetchShopChecked, toggleShopChecked as dbToggleShopChecked,
   fetchRegChecked, toggleRegChecked as dbToggleRegChecked,
   fetchFreeShop, addFreeShopItem as dbAddFreeShopItem, updateFreeShopItem as dbUpdateFreeShopItem,
@@ -21,7 +22,7 @@ import {
   fetchRecipeData, uploadRecipeFile, removeRecipeFile,
   THIS_WEEK,
 } from './lib/db.js';
-import { normalizeIngredient } from './lib/ingredients.js';
+import { normalizeIngredient, findDuplicates } from './lib/ingredients.js';
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -670,10 +671,12 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
 // ── Shopping Sheet ────────────────────────────────────────────────────────────
 
 function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAddRegular, onRemoveRegular,
-  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop }) {
+  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, shopFilters }) {
 
   const [freeInput, setFreeInput] = useState("");
   const [regularInput, setRegularInput] = useState("");
+  const [unfilteredIds, setUnfilteredIds] = useState(new Set());
+  const [popoverId, setPopoverId] = useState(null);
 
   const toggleReg  = id => onToggleRegChecked(id);
   const removeReg  = id => onRemoveRegular(id);
@@ -694,49 +697,71 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
   const fridgeNames   = (fridge  || []).map(i => i.item.toLowerCase());
   const stapleShopItems = staples
     .filter(s => s.status === "restock")
-    .map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock" }));
+    .map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock", recipeName: "pantry restock" }));
   const recipeItems = (week || [])
     .filter(d => d.recipe?.ingredients?.length)
-    .flatMap(d => d.recipe.ingredients.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing })))
+    .flatMap(d => d.recipe.ingredients.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing, recipeName: d.recipe.title })))
     .filter(item => !okStapleNames.includes(item.text.toLowerCase())
                  && !freezerNames.includes(item.text.toLowerCase())
                  && !fridgeNames.includes(item.text.toLowerCase()));
   const deduped = [];
   const seen = {};
   recipeItems.forEach(item => {
-    if (seen[item.text]) { seen[item.text].source += ", " + item.source; }
+    if (seen[item.text]) { seen[item.text].source += ", " + item.source; seen[item.text].recipeName += ", " + item.recipeName; }
     else { seen[item.text] = { ...item }; deduped.push(seen[item.text]); }
   });
-  const allRecipeItems = [...stapleShopItems, ...deduped, ...freeShop.map(f => ({ ...f, source: null }))];
+  const allDeduped = [...stapleShopItems, ...deduped, ...freeShop.map(f => ({ ...f, source: null }))];
+
+  // Split staple-filtered vs main — pantry staple names auto-included + user extras from shopFilters
+  const allFilterNames = [...new Set([...staples.map(s => s.name.toLowerCase()), ...shopFilters])];
+  const isFiltered = (text) => allFilterNames.some(s => normalizeIngredient(text).toLowerCase().includes(s));
+  const mainItems = allDeduped.filter(item => !isFiltered(item.text) || unfilteredIds.has(item.id));
+  const filteredItems = allDeduped.filter(item => isFiltered(item.text) && !unfilteredIds.has(item.id));
+
+  // Duplicate detection among main items
+  const dupMap = findDuplicates(mainItems);
 
   const regsUnchecked = regulars.filter(r => !regChecked[r.id]);
   const regsChecked   = regulars.filter(r =>  regChecked[r.id]);
-  const recipeUnchecked = allRecipeItems.filter(i => !shopChecked[i.id] && !i.done);
-  const recipeChecked   = allRecipeItems.filter(i =>  shopChecked[i.id] ||  i.done);
+  const recipeUnchecked = mainItems.filter(i => !shopChecked[i.id] && !i.done);
+  const recipeChecked   = mainItems.filter(i =>  shopChecked[i.id] ||  i.done);
 
   const totalUnchecked = regsUnchecked.length + recipeUnchecked.length;
 
-  function ShopGroup({ items, checked, onToggle, twoCol = true }) {
-    if (!items.length) return null;
-    return twoCol ? (
-      <div className="shop-col-grid">
-        {items.map(item => (
-          <div key={item.id} className={"shop-col-item" + (checked ? " done-item" : "")}
-               style={checked ? {textDecoration:"line-through"} : {}}>
-            <input type="checkbox" checked={!!checked} onChange={() => onToggle(item.id)}/>
-            <div style={{flex:1, minWidth:0}}>
-              <div className="shop-col-text">{item.text ?? item.name}</div>
-              {item.source && <div className="shop-col-source">{item.source}</div>}
-            </div>
-          </div>
-        ))}
+  const unfilterItem = (item) => {
+    setUnfilteredIds(prev => new Set([...prev, item.id]));
+  };
+  const refilterItem = (item) => {
+    setUnfilteredIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
+  };
+
+  const renderRecipeRow = (item, checked) => {
+    const isDup = dupMap.has(item.id);
+    const wasUnfiltered = unfilteredIds.has(item.id);
+    return (
+      <div key={item.id} className={"shop-col-item" + (checked ? " done-item" : "") + (isDup && !checked ? " duplicate-item" : "")}
+           style={checked ? {textDecoration:"line-through", position:"relative"} : {position:"relative"}}
+           onClick={() => { if (isDup && !checked) setPopoverId(popoverId === item.id ? null : item.id); }}>
+        <input type="checkbox" checked={!!checked} onChange={() => item.done !== undefined ? toggleFreeShop(item.id) : toggleShop(item.id)}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div className="shop-col-text">{item.text}</div>
+          {item.source && <div className="shop-col-source">{item.recipeName || item.source}</div>}
+        </div>
+        {wasUnfiltered && !checked && (
+          <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }} title="Move back to filtered">↩</button>
+        )}
+        {popoverId === item.id && dupMap.get(item.id) && (
+          <span className="dup-popover" onClick={e => e.stopPropagation()}>
+            Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
+          </span>
+        )}
       </div>
-    ) : null;
-  }
+    );
+  };
 
   return (
     <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" style={{maxHeight:"92vh"}} onClick={e => e.stopPropagation()}>
+      <div className="sheet" style={{maxHeight:"92vh"}} onClick={e => { e.stopPropagation(); setPopoverId(null); }}>
         <div className="sheet-handle"/>
         <div className="sheet-header" style={{paddingBottom:10}}>
           <div className="sheet-title">
@@ -778,30 +803,31 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
 
           {/* This week */}
           <div className="shop-sheet-group-label">This week's recipes</div>
-          {recipeUnchecked.length === 0 && recipeChecked.length === 0 && freeShop.length === 0 ? (
+          {recipeUnchecked.length === 0 && recipeChecked.length === 0 && freeShop.length === 0 && filteredItems.length === 0 ? (
             <div style={{padding:"10px 20px", color:"var(--ink4)", fontSize:12, fontStyle:"italic"}}>
               Plan dinners to auto-populate ingredients here.
             </div>
           ) : (
             <div className="shop-col-grid">
-              {recipeUnchecked.map(item => (
-                <div key={item.id} className="shop-col-item">
-                  <input type="checkbox" checked={false} onChange={() => item.done !== undefined ? toggleFreeShop(item.id) : toggleShop(item.id)}/>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div className="shop-col-text">{item.text}</div>
-                    {item.source && <div className="shop-col-source">{item.source}</div>}
-                  </div>
-                </div>
-              ))}
-              {recipeChecked.map(item => (
-                <div key={item.id} className="shop-col-item done-item">
-                  <input type="checkbox" checked={true} onChange={() => item.done !== undefined ? toggleFreeShop(item.id) : toggleShop(item.id)}/>
-                  <div style={{flex:1,minWidth:0,textDecoration:"line-through"}}>
-                    <div className="shop-col-text">{item.text}</div>
-                  </div>
-                </div>
-              ))}
+              {recipeUnchecked.map(item => renderRecipeRow(item, false))}
+              {recipeChecked.map(item => renderRecipeRow(item, true))}
             </div>
+          )}
+          {filteredItems.length > 0 && (
+            <details className="filtered-section" style={{padding:"0 12px 6px"}}>
+              <summary className="filtered-summary">Filtered out ({filteredItems.length})</summary>
+              <div className="filtered-note">These match common staples — check your pantry</div>
+              <div className="shop-col-grid">
+                {filteredItems.map(item => (
+                  <div key={item.id} className="shop-col-item" style={{opacity:0.45, fontStyle:"italic", cursor:"pointer"}}
+                    onClick={() => unfilterItem(item)}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div className="shop-col-text">{item.text}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
           <div style={{padding:"6px 12px 10px", display:"flex", gap:8}}>
             <input className="pantry-add-input" placeholder="Add item…" value={freeInput}
@@ -1636,34 +1662,52 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
 }
 
 // ── Inline Shopping List (week tab) ──────────────────────────────────────────
-function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop }) {
+function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, shopFilters }) {
   const [freeInput, setFreeInput] = useState("");
+  const [unfilteredIds, setUnfilteredIds] = useState(new Set());
+  const [popoverId, setPopoverId] = useState(null);
 
   const okStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
   const freezerNames  = (freezer || []).map(i => i.item.toLowerCase());
   const fridgeNames   = (fridge  || []).map(i => i.item.toLowerCase());
-  const stapleShopItems = staples.filter(s => s.status === "restock").map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock" }));
+  const stapleShopItems = staples.filter(s => s.status === "restock").map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock", recipeName: "pantry restock" }));
   const recipeItems = (week || [])
     .filter(d => d.recipe?.ingredients?.length)
     .flatMap(d => {
       const ings = d.recipe.ingredients;
-      return ings.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing }));
+      return ings.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing, recipeName: d.recipe.title }));
     })
     .filter(item => !okStapleNames.includes(item.text.toLowerCase()) && !freezerNames.includes(item.text.toLowerCase()) && !fridgeNames.includes(item.text.toLowerCase()));
   const deduped = []; const seen = {};
   recipeItems.forEach(item => {
-    if (seen[item.text]) seen[item.text].source += ", " + item.source;
+    if (seen[item.text]) { seen[item.text].source += ", " + item.source; seen[item.text].recipeName += ", " + item.recipeName; }
     else { seen[item.text] = { ...item }; deduped.push(seen[item.text]); }
   });
-  const allItems = [...stapleShopItems, ...deduped, ...freeShop];
+  const allDeduped = [...stapleShopItems, ...deduped, ...freeShop];
+
+  // Split staple-filtered vs main — pantry staple names auto-included + user extras from shopFilters
+  const allFilterNames = [...new Set([...staples.map(s => s.name.toLowerCase()), ...shopFilters])];
+  const isFiltered = (text) => allFilterNames.some(s => normalizeIngredient(text).toLowerCase().includes(s));
+  const mainItems = allDeduped.filter(item => !isFiltered(item.text) || unfilteredIds.has(item.id));
+  const filteredItems = allDeduped.filter(item => isFiltered(item.text) && !unfilteredIds.has(item.id));
+
+  // Duplicate detection among main items
+  const dupMap = findDuplicates(mainItems);
 
   const toggleItem = (item) => {
     if (item.done !== undefined) onToggleFreeShop(item.id);
     else onToggleShopChecked(item.id);
   };
 
+  const unfilterItem = (item) => {
+    setUnfilteredIds(prev => new Set([...prev, item.id]));
+  };
+  const refilterItem = (item) => {
+    setUnfilteredIds(prev => { const next = new Set(prev); next.delete(item.id); return next; });
+  };
+
   return (
-    <div className="week-shop-section">
+    <div className="week-shop-section" onClick={() => popoverId && setPopoverId(null)}>
       {regulars.length > 0 && <>
         <div className="week-shop-group-label">Every week</div>
         <div className="week-shop-pills">
@@ -1675,18 +1719,48 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
           ))}
         </div>
       </>}
-      {allItems.length > 0 && <>
+      {mainItems.length > 0 && <>
         <div className="week-shop-group-label">This week</div>
         <div className="week-shop-pills">
-          {allItems.map(item => (
-            <span key={item.id} className={"shop-pill" + ((shopChecked[item.id] || item.done) ? " done" : "")}
-              onClick={() => toggleItem(item)}>
-              {item.text}
-            </span>
-          ))}
+          {mainItems.map(item => {
+            const isDup = dupMap.has(item.id);
+            const isChecked = shopChecked[item.id] || item.done;
+            const wasUnfiltered = unfilteredIds.has(item.id);
+            return (
+              <span key={item.id} style={{position:"relative"}}>
+                <span className={"shop-pill" + (isDup ? " duplicate" : "") + (isChecked ? " done" : "")}
+                  onClick={(e) => {
+                    if (isDup && !isChecked) { e.stopPropagation(); setPopoverId(popoverId === item.id ? null : item.id); }
+                    else toggleItem(item);
+                  }}>
+                  {item.text}
+                  {wasUnfiltered && !isChecked && <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }}>↩</button>}
+                </span>
+                {popoverId === item.id && dupMap.get(item.id) && (
+                  <span className="dup-popover" onClick={e => e.stopPropagation()}>
+                    Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
+                    <br/><span style={{fontSize:10, color:"var(--ink4)"}}>Tap pill again to check off</span>
+                  </span>
+                )}
+              </span>
+            );
+          })}
         </div>
       </>}
-      {regulars.length === 0 && allItems.length === 0 && (
+      {filteredItems.length > 0 && (
+        <details className="filtered-section">
+          <summary className="filtered-summary">Filtered out ({filteredItems.length})</summary>
+          <div className="filtered-note">These match common staples — check your pantry</div>
+          <div className="week-shop-pills">
+            {filteredItems.map(item => (
+              <span key={item.id} className="shop-pill filtered" onClick={() => unfilterItem(item)}>
+                {item.text}
+              </span>
+            ))}
+          </div>
+        </details>
+      )}
+      {regulars.length === 0 && mainItems.length === 0 && filteredItems.length === 0 && (
         <div className="week-shop-empty">Plan dinners to populate your list.</div>
       )}
       <div style={{display:"flex", gap:8, marginBottom:10}}>
@@ -1705,7 +1779,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
   batch, prepTasks, prepChecked, onSlot, onRemove, onSlotNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
-  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty }) {
+  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty, shopFilters }) {
   const [shopOpen, setShopOpen]     = useState(true);
   const [prepOpen, setPrepOpen]     = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1954,6 +2028,7 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           regulars={regulars} regChecked={regChecked} onToggleRegChecked={onToggleRegChecked}
           shopChecked={shopChecked} onToggleShopChecked={onToggleShopChecked}
           freeShop={freeShop} onAddFreeShop={onAddFreeShop} onToggleFreeShop={onToggleFreeShop}
+          shopFilters={shopFilters}
         />
       )}
 
@@ -2387,9 +2462,10 @@ function InventoryView({ week, recipes, staples, onAddStaple, onCycleStaple, onR
   );
 }
 
-function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCustomTag, customCategories, onAddCustomCategory, onRemoveCustomCategory, recipes, setRecipes }) {
+function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCustomTag, customCategories, onAddCustomCategory, onRemoveCustomCategory, shopFilters, onAddShopFilter, onRemoveShopFilter, recipes, setRecipes }) {
   const [newTag, setNewTag]       = useState("");
   const [newCat, setNewCat]       = useState("");
+  const [newFilter, setNewFilter] = useState("");
   const [thumbMsg, setThumbMsg]   = useState(null);
   const [thumbBusy, setThumbBusy] = useState(false);
 
@@ -2510,6 +2586,26 @@ function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCust
         </div>
       </div>
 
+      <div className="pantry-section-label" style={{marginTop:24}}>Extra Shopping Filters</div>
+      <div style={{fontSize:11, color:"var(--ink4)", fontStyle:"italic", marginBottom:6}}>Pantry staples are always filtered — add more here</div>
+      <div className="inv-card" style={{marginBottom:12}}>
+        <div className="pantry-pill-row" style={{marginBottom: shopFilters.length ? 8 : 0}}>
+          {shopFilters.map(f => (
+            <span key={f} className="pantry-pill">
+              {f}
+              <button className="pp-remove" onClick={() => onRemoveShopFilter(f)}>×</button>
+            </span>
+          ))}
+        </div>
+        <div className="pantry-pill-add">
+          <input className="pantry-add-input" placeholder="Add a filter…" value={newFilter}
+            onChange={e => setNewFilter(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && newFilter.trim() && !shopFilters.includes(newFilter.trim().toLowerCase())) { onAddShopFilter(newFilter.trim()); setNewFilter(""); }}}/>
+          <button className="pantry-add-btn" disabled={!newFilter.trim()}
+            onClick={() => { const f = newFilter.trim().toLowerCase(); if (f && !shopFilters.includes(f)) { onAddShopFilter(f); setNewFilter(""); }}}>Add</button>
+        </div>
+      </div>
+
       <div className="pantry-section-label" style={{marginTop:24}}>Thumbnails</div>
       <div className="inv-card" style={{padding:"12px 14px", display:"flex", alignItems:"center", gap:10}}>
         <button className="btn btn-primary" style={{fontSize:12, padding:"8px 14px"}} disabled={thumbBusy} onClick={handleFetchThumbnails}>
@@ -2546,6 +2642,7 @@ export default function App() {
   const [fridge, setFridge] = useState([]);
   const [customTags, setCustomTags]             = useState([]);
   const [customCategories, setCustomCategories] = useState([]);
+  const [shopFilters, setShopFilters]           = useState([]);
   const [freezer, setFreezer] = useState([]);
   const [batch, setBatch]     = useState([]);
   const [prepTasks, setPrepTasks]     = useState([]);
@@ -2557,7 +2654,8 @@ export default function App() {
       try {
         const [recipesData, weekData, batchData, fridgeData, freezerData,
                staplesData, regularsData, prefsData, customTagsData, customCatsData,
-               shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData] = await Promise.all([
+               shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData,
+               shopFiltersData] = await Promise.all([
           fetchRecipes(),
           fetchWeekPlan(),
           fetchBatchPrep(),
@@ -2573,6 +2671,7 @@ export default function App() {
           fetchFreeShop(),
           fetchPrepTasks(),
           fetchPrepChecked(),
+          fetchShopFilters(),
         ]);
         setRecipes(recipesData.map(toAppRecipe));
         setWeek(weekData);
@@ -2589,6 +2688,7 @@ export default function App() {
         setFreeShop(freeShopData);
         setPrepTasks(prepTasksData);
         setPrepChecked(prepCheckedData);
+        setShopFilters(shopFiltersData);
       } catch (e) { console.error('loadAll failed', e); }
       setLoading(false);
     }
@@ -2844,6 +2944,18 @@ export default function App() {
     try { await dbRemoveCustomCategory(name); } catch (e) { console.error(e); }
   };
 
+  // ── Shop filter handlers ──
+  const handleAddShopFilter = async (name) => {
+    const n = name.toLowerCase().trim();
+    if (!n || shopFilters.includes(n)) return;
+    setShopFilters(f => [...f, n]);
+    try { await dbAddShopFilter(n); } catch (e) { console.error(e); }
+  };
+  const handleRemoveShopFilter = async (name) => {
+    setShopFilters(f => f.filter(x => x !== name));
+    try { await dbRemoveShopFilter(name); } catch (e) { console.error(e); }
+  };
+
   // ── Shopping checked handlers ──
   const handleToggleShopChecked = async (key) => {
     const wasChecked = shopChecked[key];
@@ -2922,11 +3034,11 @@ export default function App() {
       onSlot={handleSlot} onRemove={handleRemove} onSlotNote={handleSlotNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
-      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop}
+      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} shopFilters={shopFilters}
       onAdjustFreezerQty={handleAdjustFreezerQty} />,
     recipes: <RecipesView recipes={recipes} library={library} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} onPromoteRadar={handlePromoteRadar} customTags={customTags} customCategories={customCategories} />,
     pantry:  <InventoryView week={week} recipes={recipes} staples={staples} onAddStaple={handleAddStaple} onCycleStaple={handleCycleStaple} onRemoveStaple={handleRemoveStaple} regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular} fridge={fridge} onAddFridge={handleAddFridge} onCycleFridge={handleCycleFridge} onRemoveFridge={handleRemoveFridge} freezer={freezer} onAddFreezer={handleAddFreezer} onAdjustFreezerQty={handleAdjustFreezerQty} onRemoveFreezer={handleRemoveFreezer} />,
-    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} recipes={recipes} setRecipes={setRecipes} />,
+    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} shopFilters={shopFilters} onAddShopFilter={handleAddShopFilter} onRemoveShopFilter={handleRemoveShopFilter} recipes={recipes} setRecipes={setRecipes} />,
   };
   return (
     <>
@@ -2943,6 +3055,7 @@ export default function App() {
             regChecked={regChecked} onToggleRegChecked={handleToggleRegChecked}
             shopChecked={shopChecked} onToggleShopChecked={handleToggleShopChecked}
             freeShop={freeShop} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop}
+            shopFilters={shopFilters}
           />
         )}
         <nav className="tabs">

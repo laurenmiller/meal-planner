@@ -54,3 +54,59 @@ export function normalizeIngredient(raw) {
 
   return s || raw.trim()
 }
+
+// ── Baseline staple filter ──────────────────────────────────────────────────
+
+export const BASELINE_STAPLES = [
+  "garlic", "olive oil", "butter", "salt", "pepper", "black pepper",
+  "sugar", "flour", "vegetable oil", "cooking spray", "water",
+  "soy sauce", "vinegar", "lemon juice", "onion", "baking powder",
+  "baking soda", "cornstarch", "honey", "mustard",
+]
+
+export function isBaselineStaple(ingredientText) {
+  const norm = normalizeIngredient(ingredientText).toLowerCase()
+  return BASELINE_STAPLES.some(s => norm.includes(s))
+}
+
+// ── Duplicate detection ─────────────────────────────────────────────────────
+
+const DESCRIPTORS = new Set([
+  "shredded", "chopped", "diced", "minced", "fresh", "dried", "sliced",
+  "peeled", "cooked", "frozen", "canned", "ground", "whole", "large",
+  "small", "medium",
+])
+
+export function extractSignificantWords(ingredientText) {
+  const norm = normalizeIngredient(ingredientText).toLowerCase()
+  return norm
+    .split(/[\s,\-]+/)
+    .filter(w => w.length >= 4 && !UNITS.has(w) && !DESCRIPTORS.has(w))
+}
+
+export function findDuplicates(items) {
+  // Map: significantWord → [indices that contain it as last or only significant word]
+  const wordToItems = new Map()
+  const itemWords = items.map(item => extractSignificantWords(item.text))
+
+  itemWords.forEach((words, idx) => {
+    if (!words.length) return
+    // Use the last significant word as the key (or the only one)
+    const key = words[words.length - 1]
+    if (!wordToItems.has(key)) wordToItems.set(key, [])
+    wordToItems.get(key).push(idx)
+  })
+
+  // Build result: Map of item.id → array of duplicate partners
+  const result = new Map()
+  for (const [, indices] of wordToItems) {
+    if (indices.length < 2) continue
+    for (const idx of indices) {
+      const partners = indices
+        .filter(i => i !== idx)
+        .map(i => ({ text: items[i].text, recipeName: items[i].recipeName }))
+      result.set(items[idx].id, partners)
+    }
+  }
+  return result
+}

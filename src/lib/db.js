@@ -434,6 +434,32 @@ export async function removeCustomCategory(name) {
   if (error) console.error('removeCustomCategory', error)
 }
 
+// ── Shop Filters (editable staple filter list) ───────────────────────────────
+
+export async function fetchShopFilters() {
+  const { data, error } = await supabase
+    .from('shop_filters')
+    .select('name')
+    .order('name')
+  if (error) { console.error('fetchShopFilters', error); return [] }
+  return data.map(r => r.name)
+}
+
+export async function addShopFilter(name) {
+  const { error } = await supabase
+    .from('shop_filters')
+    .insert({ name: name.toLowerCase().trim() })
+  if (error) console.error('addShopFilter', error)
+}
+
+export async function removeShopFilter(name) {
+  const { error } = await supabase
+    .from('shop_filters')
+    .delete()
+    .eq('name', name)
+  if (error) console.error('removeShopFilter', error)
+}
+
 // ── Shop Checked (per-week ingredient check state) ───────────────────────────
 
 export async function fetchShopChecked() {
