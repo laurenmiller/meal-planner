@@ -2076,6 +2076,7 @@ function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, custo
             return (
               <div key={r.id} className="batch-recipe-card" onClick={() => setBatchDetail(r)}>
                 <button className="batch-card-remove" onClick={e => { e.stopPropagation(); onRemoveBatch(r.id); }}>×</button>
+                {r.thumbnailUrl && <img className="batch-card-thumb" src={r.thumbnailUrl} alt="" />}
                 <div className="batch-card-body">
                   <div className="batch-card-title">{r.title}</div>
                   {recipeLink ? (
