@@ -99,27 +99,7 @@ export async function deleteRecipe(id) {
 
 // ── Week Plan ────────────────────────────────────────────────────────────────
 
-export async function fetchWeekPlan() {
-  const { data, error } = await supabase
-    .from('week_plan')
-    .select('*, recipe:recipes(*)')
-    .eq('week_start', THIS_WEEK)
-    .order('day')
-  if (error) { console.error('fetchWeekPlan', error); return DAY_NAMES.map(day => ({ day, recipe: null, note: null })) }
-
-  // Build full 7-day array, filling gaps
-  const byIndex = {}
-  data.forEach(row => { byIndex[row.day] = row })
-  return DAY_NAMES.map((day, i) => {
-    const row = byIndex[i]
-    return {
-      day,
-      recipe: row?.recipe ? toAppRecipe(row.recipe) : null,
-      note:   row?.note || null,
-    }
-  })
-}
-
+// Legacy functions — kept for migration reads
 export async function upsertWeekDay(week, dayIndex, fields) {
   const row = { week_start: week, day: dayIndex }
   if ('recipeId' in fields) row.recipe_id = fields.recipeId
@@ -137,6 +117,138 @@ export async function clearWeekPlan(week) {
     .delete()
     .eq('week_start', week)
   if (error) console.error('clearWeekPlan', error)
+}
+
+// ── Week Plan Items (multi-item per day) ────────────────────────────────────
+
+/** Convert DB row → app item shape */
+export function toAppItem(row) {
+  return {
+    id: row.id,
+    itemType: row.item_type,
+    recipe: row.recipe ? toAppRecipe(row.recipe) : null,
+    ingredients: row.ingredients || [],
+    cookTime: row.cook_time || null,
+    thumbnailUrl: row.thumbnail_url || null,
+    note: row.note || null,
+    sortOrder: row.sort_order ?? 0,
+  }
+}
+
+export async function fetchWeekPlanItems(weekStart) {
+  const { data, error } = await supabase
+    .from('week_plan_items')
+    .select('*, recipe:recipes(*)')
+    .eq('week_start', weekStart)
+    .order('day')
+    .order('sort_order')
+  if (error) { console.error('fetchWeekPlanItems', error); return DAY_NAMES.map(day => ({ day, items: [] })) }
+
+  const byDay = {}
+  data.forEach(row => {
+    if (!byDay[row.day]) byDay[row.day] = []
+    byDay[row.day].push(toAppItem(row))
+  })
+  return DAY_NAMES.map((day, i) => ({ day, items: byDay[i] || [] }))
+}
+
+export async function fetchWeekPlan() {
+  return fetchWeekPlanItems(THIS_WEEK)
+}
+
+export async function addWeekPlanItem(weekStart, dayIndex, item) {
+  const row = {
+    week_start: weekStart,
+    day: dayIndex,
+    sort_order: item.sortOrder ?? 0,
+    item_type: item.itemType,
+    recipe_id: item.recipeId || null,
+    ingredients: item.ingredients || null,
+    cook_time: item.cookTime || null,
+    thumbnail_url: item.thumbnailUrl || null,
+    note: item.note || null,
+  }
+  const { data, error } = await supabase
+    .from('week_plan_items')
+    .insert(row)
+    .select('*, recipe:recipes(*)')
+    .single()
+  if (error) { console.error('addWeekPlanItem', error); throw error }
+  return toAppItem(data)
+}
+
+export async function removeWeekPlanItem(id) {
+  const { error } = await supabase
+    .from('week_plan_items')
+    .delete()
+    .eq('id', id)
+  if (error) console.error('removeWeekPlanItem', error)
+}
+
+export async function clearDayItems(weekStart, dayIndex) {
+  const { error } = await supabase
+    .from('week_plan_items')
+    .delete()
+    .eq('week_start', weekStart)
+    .eq('day', dayIndex)
+  if (error) console.error('clearDayItems', error)
+}
+
+export async function clearWeekPlanItems(weekStart) {
+  const { error } = await supabase
+    .from('week_plan_items')
+    .delete()
+    .eq('week_start', weekStart)
+  if (error) console.error('clearWeekPlanItems', error)
+}
+
+export async function migrateWeekPlanToItems(weekStart) {
+  // Check if items already exist for this week — skip if so
+  const { data: existing, error: checkErr } = await supabase
+    .from('week_plan_items')
+    .select('id')
+    .eq('week_start', weekStart)
+    .limit(1)
+  if (checkErr) { console.error('migrateWeekPlanToItems check', checkErr); return }
+  if (existing && existing.length > 0) return
+
+  // Read old week_plan rows
+  const { data: oldRows, error: oldErr } = await supabase
+    .from('week_plan')
+    .select('*, recipe:recipes(*)')
+    .eq('week_start', weekStart)
+  if (oldErr) { console.error('migrateWeekPlanToItems read', oldErr); return }
+  if (!oldRows || oldRows.length === 0) return
+
+  const inserts = []
+  oldRows.forEach(row => {
+    if (row.recipe_id && row.recipe) {
+      inserts.push({
+        week_start: weekStart,
+        day: row.day,
+        sort_order: 0,
+        item_type: 'recipe',
+        recipe_id: row.recipe_id,
+        ingredients: row.recipe.ingredients || null,
+        cook_time: row.recipe.time_mins || null,
+        thumbnail_url: row.recipe.thumbnail_url || null,
+      })
+    } else if (row.note) {
+      inserts.push({
+        week_start: weekStart,
+        day: row.day,
+        sort_order: 0,
+        item_type: 'note',
+        note: row.note,
+      })
+    }
+  })
+  if (inserts.length > 0) {
+    const { error: insertErr } = await supabase
+      .from('week_plan_items')
+      .insert(inserts)
+    if (insertErr) console.error('migrateWeekPlanToItems insert', insertErr)
+  }
 }
 
 // ── Batch Prep ───────────────────────────────────────────────────────────────

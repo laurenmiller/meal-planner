@@ -3,7 +3,7 @@ import './styles.css';
 import { supabase } from './lib/supabase.js';
 import {
   fetchRecipes, addRecipe as dbAddRecipe, updateRecipe as dbUpdateRecipe, deleteRecipe as dbDeleteRecipe, toAppRecipe,
-  fetchWeekPlan, upsertWeekDay, clearWeekPlan,
+  fetchWeekPlanItems, addWeekPlanItem, removeWeekPlanItem, clearWeekPlanItems, clearDayItems, migrateWeekPlanToItems,
   fetchBatchPrep, addBatchItem, removeBatchItem, clearBatchPrep,
   addRadarItem as dbAddRadarItem, promoteToLibrary as dbPromoteToLibrary,
   fetchFridge, addFridgeItem as dbAddFridgeItem, updateFridgeItem as dbUpdateFridgeItem, removeFridgeItem as dbRemoveFridgeItem,
@@ -39,15 +39,7 @@ const RECIPES_INIT = [
   { id:8, title:"Chocolate Chip Cookies",      source:"NYT Cooking",     tags:[],               time:35, category:"sweets",    ingredients:["butter","brown sugar","eggs","vanilla","flour","chocolate chips"] },
 ];
 
-const WEEK_INIT = [
-  { day:"Mon", recipe:RECIPES_INIT[2] },
-  { day:"Tue", recipe:RECIPES_INIT[0] },
-  { day:"Wed", recipe:null },
-  { day:"Thu", recipe:RECIPES_INIT[1] },
-  { day:"Fri", recipe:RECIPES_INIT[4] },
-  { day:"Sat", recipe:null },
-  { day:"Sun", recipe:RECIPES_INIT[3] },
-];
+const WEEK_INIT = DAY_NAMES.map(day => ({ day, items: [] }));
 
 const RADAR_INIT = [
   { id: "r1", title: "Miso Glazed Black Cod", url: "https://nomnompaleo.com/miso-glazed-black-cod", source: "Nom Nom Paleo" },
@@ -714,8 +706,14 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
     .filter(s => s.status === "restock")
     .map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock", recipeName: "pantry restock" }));
   const recipeItems = (week || [])
-    .filter(d => d.recipe?.ingredients?.length)
-    .flatMap(d => d.recipe.ingredients.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing, recipeName: d.recipe.title })))
+    .flatMap(d => d.items
+      .filter(it => it.itemType === 'recipe' && (it.ingredients?.length || it.recipe?.ingredients?.length))
+      .flatMap(it => {
+        const ings = it.ingredients?.length ? it.ingredients : (it.recipe?.ingredients || []);
+        const recipeName = it.recipe?.title || 'Unknown';
+        return ings.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + it.id + ":" + ing, recipeName }));
+      })
+    )
     .filter(item => !okStapleNames.includes(item.text.toLowerCase())
                  && !freezerNames.includes(item.text.toLowerCase())
                  && !fridgeNames.includes(item.text.toLowerCase()));
@@ -964,8 +962,8 @@ function RadarReviewSheet({ radarItem, scrapedData, onConfirm, onCancel }) {
 // targetDay: the WEEK entry being edited (or null for "pick any unplanned day")
 // onClose, onSlot(dayIndex, recipe), onRemove(dayIndex), onAddRecipe(recipe)
 
-function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot, onRemove, onSlotNote, onAddRecipe, freezer, onAdjustFreezerQty, customTags = [], customCategories = [] }) {
-  const [mode, setMode]       = useState(targetDay?.recipe ? "pick" : "pick");
+function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddItem, onRemoveItem, onClearDay, onAddNote, onAddRecipe, freezer, onAdjustFreezerQty, customTags = [], customCategories = [] }) {
+  const [mode, setMode]       = useState("pick");
   const [search, setSearch]   = useState("");
   const [newTitle, setNewTitle]         = useState("");
   const [newUrl, setNewUrl]             = useState("");
@@ -989,7 +987,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
   const lastFetchedUrlRef = useRef("");
 
   const [deductPrompt, setDeductPrompt] = useState(null);
-  const [noteText, setNoteText] = useState(targetDay?.note || "");
+  const [noteText, setNoteText] = useState("");
   // deductPrompt: { recipe, matches: [{freezerItem, qty}] }
 
   const filtered = recipes.filter(r =>
@@ -1011,14 +1009,9 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
     if (matches.length) {
       setDeductPrompt({ recipe, matches });
     } else {
-      onSlot(dayIndex, recipe);
+      onAddItem(dayIndex, recipe);
       onClose();
     }
-  };
-
-  const handleRemove = () => {
-    onRemove(dayIndex);
-    onClose();
   };
 
   const doUrlScrape = async (urlVal) => {
@@ -1077,7 +1070,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
     if (matches.length) {
       setDeductPrompt({ recipe, matches });
     } else {
-      onSlot(dayIndex, recipe);
+      onAddItem(dayIndex, recipe);
       onClose();
     }
   };
@@ -1086,12 +1079,12 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
     deductPrompt.matches.forEach(({ freezerItem, deduct }) => {
       onAdjustFreezerQty(freezerItem.id, -deduct);
     });
-    onSlot(dayIndex, deductPrompt.recipe);
+    onAddItem(dayIndex, deductPrompt.recipe);
     onClose();
   };
 
   const skipDeduct = () => {
-    onSlot(dayIndex, deductPrompt.recipe);
+    onAddItem(dayIndex, deductPrompt.recipe);
     onClose();
   };
 
@@ -1147,7 +1140,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
         <div className="sheet-handle"/>
         <div className="sheet-header">
           <div className="sheet-title">
-            {targetDay?.recipe ? <>Change <em>{targetDay.day}</em>'s dinner</> : <>Plan <em>{targetDay?.day ?? "a night"}</em></>}
+            {targetDay?.items?.length > 0 ? <>Add to <em>{targetDay.day}</em>'s dinner</> : <>Plan <em>{targetDay?.day ?? "a night"}</em></>}
           </div>
           <div className="sheet-subtitle">{dayLabel}</div>
         </div>
@@ -1169,17 +1162,6 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
         <div className="sheet-body">
           {mode === "pick" && (<>
-            {/* Show current recipe if day is already planned */}
-            {(targetDay?.recipe || targetDay?.note) && (
-              <div className="sheet-current">
-                <div>
-                  <div className="sheet-current-label">Currently planned</div>
-                  <div className="sheet-current-title">{targetDay.recipe?.title ?? targetDay.note}</div>
-                </div>
-                <button className="sheet-remove-btn" onClick={handleRemove}>Clear</button>
-              </div>
-            )}
-
             <input
               className="pick-search"
               placeholder="Search recipes…"
@@ -1249,17 +1231,12 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
                   onChange={e => setNoteText(e.target.value)}
                   onKeyDown={e => {
                     if (e.key === "Enter" && noteText.trim()) {
-                      onSlotNote(dayIndex, noteText);
+                      onAddNote(dayIndex, noteText);
                       onClose();
                     }
                   }}
                 />
               </div>
-              {targetDay?.note && (
-                <div style={{fontSize:11, color:"var(--ink4)", marginTop:4, fontStyle:"italic"}}>
-                  Currently: "{targetDay.note}"
-                </div>
-              )}
             </div>
           )}
 
@@ -1365,7 +1342,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
         <div className="sheet-footer">
           {mode === "note" && (
-            <button className="sheet-btn sheet-btn-primary" disabled={!noteText.trim()} onClick={() => { onSlotNote(dayIndex, noteText); onClose(); }}>
+            <button className="sheet-btn sheet-btn-primary" disabled={!noteText.trim()} onClick={() => { onAddNote(dayIndex, noteText); onClose(); }}>
               Save note
             </button>
           )}
@@ -1385,58 +1362,63 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
 // ── Day Card & Stub ───────────────────────────────────────────────────────────
 
-function DayCard({ d, today, onClick, onDetail, readyBy }) {
-  const r = d.recipe;
-  const time = r?.time || 30;
-  const title = r?.title || "Untitled";
-  const thumb = r?.thumbnailUrl || null;
-  const source = r?.source || null;
-  const recipeLink = r ? (r.pdfUrl || r.url || null) : null;
-  const start = calcStart(readyBy, time);
-  const isRadar = r && !r.inLibrary;
+function ItemCard({ item, isToday, isPrimary, readyBy, onDetail, onRemove }) {
+  const [swiped, setSwiped] = useState(false);
+  const touchStartX = useRef(null);
+
+  const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    touchStartX.current = null;
+    if (dx < -50) setSwiped(true);
+    else if (dx > 30) setSwiped(false);
+  };
+
+  // Note card
+  if (item.itemType === 'note') {
+    return (
+      <div className={"item-card item-card-note" + (isToday ? " today" : "") + (swiped ? " swiped" : "")}
+        onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        <div className="item-card-inner" onClick={() => {}}>
+          <div className="item-note-text">{item.note}</div>
+        </div>
+        <button className="item-card-remove-hover" onClick={e => { e.stopPropagation(); onRemove(); }}>×</button>
+        <div className="item-card-remove-swipe" onClick={() => onRemove()}>Remove</div>
+      </div>
+    );
+  }
+
+  // Recipe card (library or Try Soon)
+  const r = item.recipe;
+  if (!r) return null;
+  const time = item.cookTime || r.time || 30;
+  const title = r.title || "Untitled";
+  const thumb = item.thumbnailUrl || r.thumbnailUrl || null;
+  const isRadar = !r.inLibrary;
+  const start = isPrimary ? calcStart(readyBy, time) : null;
+
   return (
-    <div className={"day-card" + (today ? " today" : "")} onClick={() => r ? onDetail(r) : onClick()}>
-      {thumb && <img className="day-card-thumb" src={thumb} alt="" />}
-      <button className="day-card-swap" title="Change recipe"
-        onClick={e => { e.stopPropagation(); onClick(); }}>⇄</button>
-      <div className="day-name">{d.day}</div>
-      <div className="day-recipe-block">
-        <div className="day-recipe-name">{title}</div>
-        {recipeLink ? (
-          <a className="day-source linked" href={recipeLink} target="_blank" rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}>
-            {source}<span className="source-arrow"> ↗</span>
-          </a>
-        ) : isRadar ? (
-          <div className="day-source"><em style={{color:"var(--accent)"}}>try soon</em></div>
-        ) : source ? (
-          <div className="day-source">{source}</div>
-        ) : null}
-        <div className="day-recipe-meta">
-          <span className="day-time">start {start}</span>
-          <span className="day-duration">· {time}m</span>
+    <div className={"item-card" + (isRadar ? " item-card-radar" : "") + (isToday ? " today" : "") + (swiped ? " swiped" : "")}
+      onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div className="item-card-inner" onClick={() => onDetail(r)}>
+        {thumb ? (
+          <img className="item-card-thumb" src={thumb} alt="" />
+        ) : (
+          <div className="item-card-thumb-placeholder">{isRadar ? "✦" : "🍽"}</div>
+        )}
+        <div className="item-card-title">{title}</div>
+        {isRadar && <div className="item-card-radar-label">Try Soon</div>}
+        <div className="item-card-meta">
+          {isPrimary ? (
+            <span>{start} · {time} min</span>
+          ) : (
+            <span>{time} min</span>
+          )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function DayStub({ d, today, onClick }) {
-  return (
-    <div className={"day-stub" + (today ? " today" : "")} onClick={onClick}>
-      <div className="day-name">{d.day}</div>
-      <div className="day-stub-label">{DEFAULT_STUB_LABEL}</div>
-    </div>
-  );
-}
-
-function DayNote({ d, today, onClick }) {
-  return (
-    <div className={"day-note" + (today ? " today" : "")} onClick={onClick}>
-      <button className="day-note-swap" title="Change plan"
-        onClick={e => { e.stopPropagation(); onClick(); }}>⇄</button>
-      <div className="day-name">{d.day}</div>
-      <div className="day-note-text">{d.note}</div>
+      <button className="item-card-remove-hover" onClick={e => { e.stopPropagation(); onRemove(); }}>×</button>
+      <div className="item-card-remove-swipe" onClick={() => onRemove()}>Remove</div>
     </div>
   );
 }
@@ -1707,11 +1689,14 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   const fridgeNames   = (fridge  || []).map(i => i.item.toLowerCase());
   const stapleShopItems = staples.filter(s => s.status === "restock").map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock", recipeName: "pantry restock" }));
   const recipeItems = (week || [])
-    .filter(d => d.recipe?.ingredients?.length)
-    .flatMap(d => {
-      const ings = d.recipe.ingredients;
-      return ings.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing, recipeName: d.recipe.title }));
-    })
+    .flatMap(d => d.items
+      .filter(it => it.itemType === 'recipe' && (it.ingredients?.length || it.recipe?.ingredients?.length))
+      .flatMap(it => {
+        const ings = it.ingredients?.length ? it.ingredients : (it.recipe?.ingredients || []);
+        const recipeName = it.recipe?.title || 'Unknown';
+        return ings.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + it.id + ":" + ing, recipeName }));
+      })
+    )
     .filter(item => !okStapleNames.includes(item.text.toLowerCase()) && !freezerNames.includes(item.text.toLowerCase()) && !fridgeNames.includes(item.text.toLowerCase()));
   const deduped = []; const seen = {};
   recipeItems.forEach(item => {
@@ -1812,7 +1797,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 // ── Week View ─────────────────────────────────────────────────────────────────
 
 function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
-  batch, prepTasks, prepChecked, onSlot, onRemove, onSlotNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
+  batch, prepTasks, prepChecked, onAddItem, onRemoveItem, onClearDay, onAddNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
   onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty, shopFilters }) {
   const [shopOpen, setShopOpen]     = useState(true);
@@ -1825,35 +1810,44 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
   const [batchDetail, setBatchDetail] = useState(null);
 
   // Derived: one prep item per planned recipe that has a prepNote
-  const recipePrepItems = week
-    .filter(d => d.recipe?.prepNote)
-    .map(d => ({ key: d.day + d.recipe.id, task: d.recipe.prepNote, day: d.day, done: !!prepChecked[d.day + d.recipe.id] }));
+  const recipePrepItems = week.flatMap(d =>
+    d.items.filter(it => it.recipe?.prepNote)
+      .map(it => ({ key: d.day + ":" + it.id + ":" + it.recipe.id, task: it.recipe.prepNote, day: d.day, done: !!prepChecked[d.day + ":" + it.id + ":" + it.recipe.id] }))
+  );
 
   // Derived: thaw tasks — freezer items whose name matches a planned recipe ingredient
   const freezerNames = (freezer || []).map(i => i.item.toLowerCase());
-  const thawItems = week
-    .filter(d => d.recipe?.ingredients?.length)
-    .flatMap(d =>
-      d.recipe.ingredients
+  const thawItems = week.flatMap(d =>
+    d.items.filter(it => it.recipe?.ingredients?.length)
+      .flatMap(it => it.recipe.ingredients
         .filter(ing => freezerNames.includes(ing.toLowerCase()))
-        .map(ing => ({ key: "thaw:" + d.day + ":" + ing, ing, day: d.day, done: !!prepChecked["thaw:" + d.day + ":" + ing] }))
-    );
+        .map(ing => ({ key: "thaw:" + d.day + ":" + it.id + ":" + ing, ing, day: d.day, done: !!prepChecked["thaw:" + d.day + ":" + it.id + ":" + ing] }))
+      )
+  );
 
   const openSheet = (dayIndex) => setSheet({ dayIndex });
   const closeSheet = () => setSheet(null);
 
-  const handleSlot = (dayIndex, recipe) => { onSlot(dayIndex, recipe); };
-  const handleRemove = (dayIndex) => { onRemove(dayIndex); };
-  const handleSlotNote = (dayIndex, note) => { onSlotNote(dayIndex, note); };
+  const handleSlot = (dayIndex, recipe) => { onAddItem(dayIndex, recipe); };
+  const handleRemoveItem = (itemId) => { onRemoveItem(itemId); };
+  const handleAddNote = (dayIndex, note) => { onAddNote(dayIndex, note); };
   const handleAddRecipe = (recipe) => { onAddRecipe(recipe); };
 
   const handleAddBatch = (recipe) => { onAddBatch(recipe); };
 
-  const row1 = week.slice(0, 4);
-  const row2 = week.slice(4, 7);
-  const planned    = week.filter(d => d.recipe);
-  const fishCount  = planned.filter(d => d.recipe.tags.includes("fish")).length;
-  const vegCount   = planned.filter(d => d.recipe.tags.includes("vegetarian")).length;
+  // Compute today index (0=Mon..6=Sun) and date numbers for each day
+  const mondayDate = new Date(THIS_WEEK + 'T00:00:00');
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dayDates = DAY_NAMES.map((_, i) => {
+    const d = new Date(mondayDate);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+  const todayIndex = dayDates.findIndex(d => d.toISOString().slice(0, 10) === todayStr);
+
+  const allRecipeItems = week.flatMap(d => d.items.filter(it => it.itemType === 'recipe' && it.recipe));
+  const fishCount  = allRecipeItems.filter(it => it.recipe.tags?.includes("fish")).length;
+  const vegCount   = allRecipeItems.filter(it => it.recipe.tags?.includes("vegetarian")).length;
   const fishMet    = fishCount >= goals.fishMin;
   const vegMet     = vegCount  >= goals.vegMin;
   const allMet     = fishMet && vegMet;
@@ -1876,8 +1870,8 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
               <button className="shop-fab" style={{background:"var(--accent)", color:"#fff", borderColor:"var(--accent)", fontSize:11, padding:"6px 12px"}}
                 onClick={() => {
                   const radarInWeek = [...new Map(
-                    week.filter(d => d.recipe && !d.recipe.inLibrary)
-                        .map(d => [d.recipe.id, d.recipe])
+                    week.flatMap(d => d.items.filter(it => it.recipe && !it.recipe.inLibrary))
+                        .map(it => [it.recipe.id, it.recipe])
                   ).values()];
                   if (radarInWeek.length > 0) {
                     setPromoteSheet(radarInWeek.map(r => ({ recipe: r, checked: true })));
@@ -1915,8 +1909,8 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
       {(() => {
         if (!fridge) return null;
         const weekIngredients = week
-          .filter(d => d.recipe?.ingredients?.length)
-          .flatMap(d => d.recipe.ingredients.map(i => i.toLowerCase()));
+          .flatMap(d => d.items.filter(it => it.recipe?.ingredients?.length))
+          .flatMap(it => it.recipe.ingredients.map(i => i.toLowerCase()));
         const unaccounted = fridge.filter(i =>
           i.s === "soon" &&
           !weekIngredients.includes(i.item.toLowerCase())
@@ -1937,24 +1931,37 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
         <div className="section-header-title">This Week's <em>Dinners</em></div>
       </div>
 
-      <div className="week-section">
-        <div className="week-row">
-          {row1.map((d, i) => d.recipe
-            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} />
-            : d.note
-            ? <DayNote key={i} d={d} today={false} onClick={() => openSheet(i)} />
-            : <DayStub key={i} d={d} today={false} onClick={() => openSheet(i)} />
-          )}
+      <div className="week-scroll-wrapper">
+        <div className="week-scroll">
+          {week.map((d, i) => {
+            const isToday = i === todayIndex;
+            const dateNum = dayDates[i].getDate();
+            return (
+              <div key={i} className="day-col">
+                <div className={"day-col-header" + (isToday ? " today" : "")}>
+                  <span className="day-col-name">{d.day}</span>
+                  <span className={"day-col-num" + (isToday ? " today" : "")}>{dateNum}</span>
+                </div>
+                {d.items.length === 0 && (
+                  <div className="day-empty-card" onClick={() => openSheet(i)}>
+                    <span>+ plan dinner</span>
+                  </div>
+                )}
+                {d.items.map((item, idx) => (
+                  <ItemCard key={item.id} item={item} isToday={isToday} isPrimary={idx === 0}
+                    readyBy={goals.readyBy} onDetail={r => setWeekDetail(r)}
+                    onRemove={() => handleRemoveItem(item.id)} />
+                ))}
+                {d.items.length > 0 && (
+                  <div className="day-add-card" onClick={() => openSheet(i)}>
+                    <span>+</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-        <div className="week-row" style={{marginTop:8}}>
-          {row2.map((d, i) => d.recipe
-            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i + 4)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} />
-            : d.note
-            ? <DayNote key={i} d={d} today={false} onClick={() => openSheet(i + 4)} />
-            : <DayStub key={i} d={d} today={false} onClick={() => openSheet(i + 4)} />
-          )}
-        </div>
-
+        <div className="week-scroll-fade" />
       </div>
 
       <div className="section-header" style={{cursor:"default"}}>
@@ -2151,12 +2158,13 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           recipes={recipes}
           radar={radar}
           onClose={closeSheet}
-          onSlot={handleSlot}
-          onRemove={handleRemove}
+          onAddItem={handleSlot}
+          onRemoveItem={handleRemoveItem}
+          onClearDay={onClearDay}
+          onAddNote={handleAddNote}
           onAddRecipe={handleAddRecipe}
           freezer={freezer}
           onAdjustFreezerQty={onAdjustFreezerQty}
-          onSlotNote={handleSlotNote}
           customTags={customTags}
           customCategories={customCategories}
         />
@@ -2703,12 +2711,11 @@ export default function App() {
   useEffect(() => {
     async function loadAll() {
       try {
-        const [recipesData, weekData, batchData, fridgeData, freezerData,
+        const [recipesData, batchData, fridgeData, freezerData,
                staplesData, regularsData, prefsData, customTagsData, customCatsData,
                shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData,
                shopFiltersData] = await Promise.all([
           fetchRecipes(),
-          fetchWeekPlan(),
           fetchBatchPrep(),
           fetchFridge(),
           fetchFreezer(),
@@ -2725,6 +2732,9 @@ export default function App() {
           fetchShopFilters(),
         ]);
         setRecipes(recipesData.map(toAppRecipe));
+        // Migrate old week_plan rows to week_plan_items, then fetch
+        await migrateWeekPlanToItems(THIS_WEEK);
+        const weekData = await fetchWeekPlanItems(THIS_WEEK);
         setWeek(weekData);
         setBatch(batchData);
         setFridge(fridgeData);
@@ -2747,9 +2757,9 @@ export default function App() {
 
     // Realtime — sync week plan, batch, and shopping across devices
     const weekSub = supabase
-      .channel('week_plan')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'week_plan' }, () => {
-        fetchWeekPlan().then(setWeek);
+      .channel('week_plan_items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'week_plan_items' }, () => {
+        fetchWeekPlanItems(THIS_WEEK).then(setWeek);
       })
       .subscribe();
     const batchSub = supabase
@@ -2791,44 +2801,71 @@ export default function App() {
   const library = recipes.filter(r => r.inLibrary);
   const radar = recipes.filter(r => !r.inLibrary);
 
-  // ── Week handlers ──
-  const handleSlot = async (dayIndex, recipe) => {
+  // ── Week handlers (multi-item) ──
+  const handleAddItem = async (dayIndex, recipe) => {
+    const currentItems = week[dayIndex]?.items || [];
+    const sortOrder = currentItems.length;
     if (recipe._needsInsert) {
-      // New recipe without a DB id — insert first, then slot
       try {
         const saved = await dbAddRecipe(recipe);
         const appRecipe = toAppRecipe(saved);
         setRecipes(rs => [...rs, appRecipe]);
-        setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: appRecipe, note: null} : d));
-        await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: appRecipe.id, note: null });
+        const savedItem = await addWeekPlanItem(THIS_WEEK, dayIndex, {
+          itemType: 'recipe', recipeId: appRecipe.id,
+          ingredients: appRecipe.ingredients, cookTime: appRecipe.time,
+          thumbnailUrl: appRecipe.thumbnailUrl, sortOrder,
+        });
+        setWeek(w => w.map((d, i) => i === dayIndex ? { ...d, items: [...d.items, savedItem] } : d));
       } catch (e) { console.error(e); }
     } else {
-      setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe, note: null} : d));
-      try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: recipe.id, note: null }); } catch (e) { console.error(e); }
+      const tempId = 'temp-' + Date.now();
+      const tempItem = { id: tempId, itemType: 'recipe', recipe, ingredients: recipe.ingredients || [], cookTime: recipe.time, thumbnailUrl: recipe.thumbnailUrl, note: null, sortOrder };
+      setWeek(w => w.map((d, i) => i === dayIndex ? { ...d, items: [...d.items, tempItem] } : d));
+      try {
+        const savedItem = await addWeekPlanItem(THIS_WEEK, dayIndex, {
+          itemType: 'recipe', recipeId: recipe.id,
+          ingredients: recipe.ingredients, cookTime: recipe.time,
+          thumbnailUrl: recipe.thumbnailUrl, sortOrder,
+        });
+        setWeek(w => w.map((d, i) => i === dayIndex ? { ...d, items: d.items.map(it => it.id === tempId ? savedItem : it) } : d));
+      } catch (e) { console.error(e); }
     }
+  };
+  const handleAddNote = async (dayIndex, text) => {
+    const currentItems = week[dayIndex]?.items || [];
+    const sortOrder = currentItems.length;
+    const tempId = 'temp-' + Date.now();
+    const tempItem = { id: tempId, itemType: 'note', recipe: null, ingredients: [], cookTime: null, thumbnailUrl: null, note: text.trim(), sortOrder };
+    setWeek(w => w.map((d, i) => i === dayIndex ? { ...d, items: [...d.items, tempItem] } : d));
+    try {
+      const savedItem = await addWeekPlanItem(THIS_WEEK, dayIndex, { itemType: 'note', note: text.trim(), sortOrder });
+      setWeek(w => w.map((d, i) => i === dayIndex ? { ...d, items: d.items.map(it => it.id === tempId ? savedItem : it) } : d));
+    } catch (e) { console.error(e); }
   };
   // Keep week in sync when recipes state updates (e.g. after background scrape)
   useEffect(() => {
-    setWeek(w => w.map(d => {
-      if (!d.recipe) return d;
-      const latest = recipes.find(r => r.id === d.recipe.id);
-      if (latest && latest !== d.recipe) return { ...d, recipe: latest };
-      return d;
-    }));
+    setWeek(w => w.map(d => ({
+      ...d,
+      items: d.items.map(item => {
+        if (!item.recipe) return item;
+        const latest = recipes.find(r => r.id === item.recipe.id);
+        return (latest && latest !== item.recipe) ? { ...item, recipe: latest } : item;
+      })
+    })));
   }, [recipes]);
-  const handleRemove = async (dayIndex) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: null, note: null} : d));
-    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null }); } catch (e) { console.error(e); }
+  const handleRemoveItem = async (itemId) => {
+    setWeek(w => w.map(d => ({ ...d, items: d.items.filter(it => it.id !== itemId) })));
+    try { await removeWeekPlanItem(itemId); } catch (e) { console.error(e); }
   };
-  const handleSlotNote = async (dayIndex, note) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, note: note.trim() || null, recipe: null} : d));
-    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: note.trim() || null }); } catch (e) { console.error(e); }
+  const handleClearDay = async (dayIndex) => {
+    setWeek(w => w.map((d, i) => i === dayIndex ? { ...d, items: [] } : d));
+    try { await clearDayItems(THIS_WEEK, dayIndex); } catch (e) { console.error(e); }
   };
   const handleWeekReset = async () => {
-    setWeek(DAY_NAMES.map(day => ({ day, recipe: null, note: null })));
+    setWeek(DAY_NAMES.map(day => ({ day, items: [] })));
     setBatch([]);
     setRegChecked({});
-    try { await clearWeekPlan(THIS_WEEK); await clearBatchPrep(THIS_WEEK); } catch (e) { console.error(e); }
+    try { await clearWeekPlanItems(THIS_WEEK); await clearBatchPrep(THIS_WEEK); } catch (e) { console.error(e); }
   };
 
   // ── Batch handlers ──
@@ -2874,8 +2911,11 @@ export default function App() {
             if (scrapedData.servings) updates.servings = scrapedData.servings;
           }
           setRecipes(rs => rs.map(r => r.id === saved.id ? updates : r));
-          // Also update any week slots referencing this recipe
-          setWeek(w => w.map(d => d.recipe?.id === saved.id ? { ...d, recipe: updates } : d));
+          // Also update any week items referencing this recipe
+          setWeek(w => w.map(d => ({
+            ...d,
+            items: d.items.map(it => it.recipe?.id === saved.id ? { ...it, recipe: updates } : it)
+          })));
           dbUpdateRecipe(saved.id, updates);
         }).catch(e => console.error('radar scrape failed', e));
       }
@@ -3070,8 +3110,8 @@ export default function App() {
   const okStapleNames    = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
   const freezerItemNames = freezer.map(i => i.item.toLowerCase());
   const fridgeItemNames  = fridge.map(i => i.item.toLowerCase());
-  const recipeIngCount = week.filter(d => d.recipe?.ingredients?.length)
-    .flatMap(d => d.recipe.ingredients)
+  const recipeIngCount = week.flatMap(d => d.items.filter(it => it.recipe?.ingredients?.length))
+    .flatMap(it => it.recipe.ingredients)
     .filter(ing => !okStapleNames.includes(ing.toLowerCase())
                 && !freezerItemNames.includes(ing.toLowerCase())
                 && !fridgeItemNames.includes(ing.toLowerCase()));
@@ -3082,7 +3122,7 @@ export default function App() {
   const views = {
     week:    <WeekView goals={goals} week={week} recipes={library} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} staples={staples} regulars={regulars} regChecked={regChecked} shopChecked={shopChecked} freeShop={freeShop} radar={radar} customTags={customTags} customCategories={customCategories}
       batch={batch} prepTasks={prepTasks} prepChecked={prepChecked}
-      onSlot={handleSlot} onRemove={handleRemove} onSlotNote={handleSlotNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
+      onAddItem={handleAddItem} onRemoveItem={handleRemoveItem} onClearDay={handleClearDay} onAddNote={handleAddNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
       onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} shopFilters={shopFilters}

@@ -56,46 +56,101 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .goal-item.met .goal-dot { background: var(--sage); }
 .goal-divider { width: 1px; height: 12px; background: var(--border); }
 
-/* ── Week grid ── */
-.week-section { padding: 0 18px; margin-bottom: 16px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.week-row { display: contents; }
-.week-row .day-card { min-width: 0; }
-.week-row .day-stub { min-width: 0; }
-.week-row .day-note { min-width: 0; }
+/* ── Week scroll (horizontal day columns) ── */
+.week-scroll-wrapper { position: relative; margin-bottom: 16px; }
+.week-scroll {
+  display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+  padding: 0 18px 8px; -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.week-scroll::-webkit-scrollbar { height: 4px; }
+.week-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.week-scroll-fade {
+  position: absolute; top: 0; right: 0; bottom: 8px; width: 32px;
+  background: linear-gradient(to right, transparent, var(--bg)); pointer-events: none;
+}
 
-.day-card { background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; padding: 10px; min-height: 116px; min-width: 0; display: flex; flex-direction: column; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s; position: relative; overflow: hidden; }
-.day-card:hover { box-shadow: 0 3px 14px rgba(0,0,0,0.07); border-color: var(--border); }
-.day-card-swap { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface2); color: var(--ink4); font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity 0.15s, background 0.15s; z-index: 2; }
-.day-card:hover .day-card-swap { opacity: 1; }
-.day-card-swap:hover { background: var(--surface3); color: var(--ink); }
-.day-source.linked:hover { color: var(--ink2); }
-.day-source.linked:hover .source-arrow { opacity: 1; }
-.day-card.today { border-color: var(--accent); }
-.day-card.today::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
-.day-name { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink4); font-weight: 700; margin-bottom: 3px; }
-.day-num { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--ink); line-height: 1; margin-bottom: 8px; }
-.day-card.today .day-num { color: var(--accent); }
-.day-recipe-block { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.day-recipe-name { font-size: 11.5px; color: var(--ink2); line-height: 1.35; font-weight: 700; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.day-source { font-size: 9.5px; color: var(--ink4); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-decoration: none; display: flex; align-items: center; gap: 3px; }
-.day-recipe-meta { display: flex; align-items: center; gap: 4px; margin-top: auto; padding-top: 5px; }
-.day-time { font-size: 10px; color: var(--accent); font-weight: 700; }
-.day-duration { font-size: 10px; color: var(--ink4); }
+.day-col { flex: 0 0 140px; scroll-snap-align: start; display: flex; flex-direction: column; gap: 5px; }
+.day-col-header { display: flex; align-items: center; gap: 6px; padding: 0 2px 4px; }
+.day-col-name { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink4); font-weight: 700; }
+.day-col-num { font-family: 'Playfair Display', serif; font-size: 16px; color: var(--ink3); line-height: 1; }
+.day-col-header.today .day-col-name { color: var(--accent); }
+.day-col-header.today .day-col-num { color: var(--accent); }
 
-.day-stub { background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 6px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; cursor: pointer; opacity: 0.7; transition: opacity 0.15s; min-width: 0; }
-.day-stub:hover { opacity: 1; }
-.day-stub.today { border-color: var(--accent-light); }
-.day-stub .day-name { font-size: 8.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink4); font-weight: 700; }
-.day-stub .day-num { font-family: 'Playfair Display', serif; font-size: 16px; color: var(--ink3); line-height: 1; }
-.day-stub.today .day-num { color: var(--accent); }
-.day-stub-label { font-size: 8.5px; color: var(--ink4); font-style: italic; text-align: center; line-height: 1.3; margin-top: 2px; }
-.day-note { background: var(--surface); border: 1px dashed var(--border); border-radius: 10px; padding: 10px; min-height: 116px; min-width: 0; display: flex; flex-direction: column; cursor: pointer; transition: box-shadow 0.15s; position: relative; overflow: hidden; }
-.day-note:hover { box-shadow: 0 3px 14px rgba(0,0,0,0.07); }
-.day-note.today { border-color: var(--accent-light); }
-.day-note-text { flex: 1; font-size: 12px; color: var(--ink2); line-height: 1.45; margin-top: 4px; font-style: italic; }
-.day-note-swap { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface2); color: var(--ink4); font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
-.day-note:hover .day-note-swap { opacity: 1; }
-.day-note-swap:hover { background: var(--surface3); color: var(--ink); }
+/* Empty day placeholder */
+.day-empty-card {
+  border: 1px dashed var(--border); border-radius: 8px; height: 80px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--ink4); font-size: 11px; font-style: italic;
+  background: transparent; transition: border-color 0.15s;
+}
+.day-empty-card:hover { border-color: var(--accent-light); color: var(--ink3); }
+
+/* "+" add card at bottom of day column */
+.day-add-card {
+  border: 1px dashed var(--border); border-radius: 8px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--ink4); font-size: 16px;
+  background: transparent; transition: border-color 0.15s;
+}
+.day-add-card:hover { border-color: var(--accent-light); color: var(--accent); }
+
+/* ── Item card (recipe / try-soon / note) ── */
+.item-card {
+  position: relative; border-radius: 10px; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border2);
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.item-card:hover { box-shadow: 0 3px 14px rgba(0,0,0,0.07); border-color: var(--border); }
+.item-card.today { border-color: var(--accent-light); }
+.item-card.today::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); z-index: 1; }
+.item-card-inner { cursor: pointer; transition: transform 0.2s ease; }
+
+/* Thumbnail */
+.item-card-thumb { width: 100%; height: 60px; object-fit: cover; display: block; }
+.item-card-thumb-placeholder {
+  width: 100%; height: 60px; display: flex; align-items: center; justify-content: center;
+  background: var(--surface2); font-size: 22px; color: var(--ink4);
+}
+.item-card-radar .item-card-thumb-placeholder { background: #f0f5f0; color: var(--sage); }
+
+/* Card text */
+.item-card-title {
+  font-size: 11.5px; color: var(--ink2); line-height: 1.35; font-weight: 700;
+  padding: 6px 8px 0; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+.item-card-radar .item-card-title { color: var(--sage); }
+.item-card-radar-label { font-size: 9px; color: var(--sage); padding: 1px 8px 0; font-style: italic; }
+.item-card-meta { font-size: 10px; color: var(--ink4); padding: 3px 8px 8px; }
+
+/* Try Soon card tint */
+.item-card-radar { border-color: #d4e5d4; background: #f6faf6; }
+
+/* Note card */
+.item-card-note { border-style: dashed; min-height: 44px; }
+.item-note-text { font-size: 12px; color: var(--ink3); line-height: 1.45; font-style: italic; padding: 10px; }
+
+/* Hover remove button (desktop) */
+.item-card-remove-hover {
+  position: absolute; top: 4px; right: 4px; width: 22px; height: 22px;
+  border-radius: 50%; border: 1px solid var(--border); background: var(--surface);
+  color: var(--ink4); font-size: 14px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; opacity: 0; transition: opacity 0.15s; z-index: 3;
+}
+.item-card:hover .item-card-remove-hover { opacity: 1; }
+.item-card-remove-hover:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+@media (hover: none) { .item-card-remove-hover { display: none; } }
+
+/* Swipe remove (mobile) */
+.item-card-remove-swipe {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 60px;
+  background: var(--accent); color: #fff; display: flex; align-items: center;
+  justify-content: center; font-size: 11px; font-weight: 700;
+  transform: translateX(100%); transition: transform 0.2s ease;
+}
+.item-card.swiped .item-card-remove-swipe { transform: translateX(0); }
+.item-card.swiped .item-card-inner { transform: translateX(-60px); }
 
 
 /* ── Section divider ── */
@@ -453,9 +508,6 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .detail-instructions li { margin-bottom: 10px; counter-increment: step; display: flex; gap: 12px; }
 .detail-instructions li::before { content: counter(step); display: flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border-radius: 50%; background: var(--surface2); border: 1px solid var(--border2); font-size: 14px; font-weight: 700; color: var(--ink3); flex-shrink: 0; }
 
-/* ── Day card thumbnail ── */
-.day-card-thumb { width: calc(100% + 20px); height: 48px; object-fit: cover; margin: -10px -10px 6px; display: block; }
-
 /* ── iPad layout (768px+) ──────────────────────────────────────────────────── */
 
 @media (min-width: 768px) {
@@ -562,10 +614,8 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
     margin-right: auto;
   }
 
-  /* Week grid: all 7 days in one row */
-  .week-section {
-    grid-template-columns: repeat(7, 1fr);
-  }
+  /* Week scroll: wider columns on desktop */
+  .day-col { flex: 0 0 160px; }
 
   /* Recipe library: fixed-size tiles, auto-fill */
   .rlist {
@@ -586,3 +636,14 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
     max-width: 900px;
   }
 }
+
+/* PlanSheet current items list */
+.sheet-current-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 0; font-size: 12px; color: var(--ink2);
+}
+.sheet-item-remove {
+  background: none; border: none; color: var(--ink4);
+  font-size: 16px; cursor: pointer; padding: 0 4px;
+}
+.sheet-item-remove:hover { color: var(--accent); }
