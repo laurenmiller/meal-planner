@@ -110,10 +110,17 @@ export async function fetchWeekPlan() {
   data.forEach(row => { byIndex[row.day] = row })
   return DAY_NAMES.map((day, i) => {
     const row = byIndex[i]
+    const isRadar = !row?.recipe && !!(row?.ingredients || row?.thumbnail_url || row?.cook_time)
     return {
       day,
       recipe: row?.recipe ? toAppRecipe(row.recipe) : null,
       note:   row?.note || null,
+      // Radar-slotted day data (stored directly on week_plan row)
+      isRadar,
+      radarIngredients: row?.ingredients || null,
+      radarCookTime:    row?.cook_time || null,
+      radarThumbnailUrl: row?.thumbnail_url || null,
+      radarTitle:       row?.radar_title || null,
     }
   })
 }
@@ -122,6 +129,10 @@ export async function upsertWeekDay(week, dayIndex, fields) {
   const row = { week_start: week, day: dayIndex }
   if ('recipeId' in fields) row.recipe_id = fields.recipeId
   if ('note' in fields) row.note = fields.note
+  if ('ingredients' in fields) row.ingredients = fields.ingredients
+  if ('cookTime' in fields) row.cook_time = fields.cookTime
+  if ('thumbnailUrl' in fields) row.thumbnail_url = fields.thumbnailUrl
+  if ('radarTitle' in fields) row.radar_title = fields.radarTitle
 
   const { error } = await supabase
     .from('week_plan')
@@ -174,18 +185,28 @@ export async function clearBatchPrep(week) {
 
 // ── Radar (watchlist) ────────────────────────────────────────────────────────
 
+function toAppRadar(row) {
+  return {
+    id:           row.id,
+    title:        row.title,
+    url:          row.url || null,
+    source:       row.source || "",
+    thumbnailUrl: row.thumbnail_url || null,
+    cookTime:     row.cook_time || null,
+    ingredients:  row.ingredients || [],
+    instructions: row.instructions || [],
+    servings:     row.servings || null,
+    scrapedAt:    row.scraped_at || null,
+  }
+}
+
 export async function fetchRadar() {
   const { data, error } = await supabase
     .from('radar')
     .select('*')
     .order('created_at', { ascending: false })
   if (error) { console.error('fetchRadar', error); return [] }
-  return data.map(row => ({
-    id:     row.id,
-    title:  row.title,
-    url:    row.url || null,
-    source: row.source || "",
-  }))
+  return data.map(toAppRadar)
 }
 
 export async function addRadarItem(item) {
@@ -195,7 +216,23 @@ export async function addRadarItem(item) {
     .select()
     .single()
   if (error) { console.error('addRadarItem', error); throw error }
-  return { id: data.id, title: data.title, url: data.url, source: data.source }
+  return toAppRadar(data)
+}
+
+export async function updateRadarItem(id, fields) {
+  const row = {}
+  if ('title' in fields) row.title = fields.title
+  if ('thumbnailUrl' in fields) row.thumbnail_url = fields.thumbnailUrl
+  if ('cookTime' in fields) row.cook_time = fields.cookTime
+  if ('ingredients' in fields) row.ingredients = fields.ingredients
+  if ('instructions' in fields) row.instructions = fields.instructions
+  if ('servings' in fields) row.servings = fields.servings
+  if ('scrapedAt' in fields) row.scraped_at = fields.scrapedAt
+  const { error } = await supabase
+    .from('radar')
+    .update(row)
+    .eq('id', id)
+  if (error) console.error('updateRadarItem', error)
 }
 
 export async function removeRadarItem(id) {

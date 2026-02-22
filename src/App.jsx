@@ -5,7 +5,7 @@ import {
   fetchRecipes, addRecipe as dbAddRecipe, updateRecipe as dbUpdateRecipe, deleteRecipe as dbDeleteRecipe, toAppRecipe,
   fetchWeekPlan, upsertWeekDay, clearWeekPlan,
   fetchBatchPrep, addBatchItem, removeBatchItem, clearBatchPrep,
-  fetchRadar, addRadarItem as dbAddRadarItem, removeRadarItem as dbRemoveRadarItem,
+  fetchRadar, addRadarItem as dbAddRadarItem, updateRadarItem as dbUpdateRadarItem, removeRadarItem as dbRemoveRadarItem,
   fetchFridge, addFridgeItem as dbAddFridgeItem, updateFridgeItem as dbUpdateFridgeItem, removeFridgeItem as dbRemoveFridgeItem,
   fetchFreezer, addFreezerItem as dbAddFreezerItem, updateFreezerItem as dbUpdateFreezerItem, removeFreezerItem as dbRemoveFreezerItem,
   fetchStaples, addStaple as dbAddStaple, updateStaple as dbUpdateStaple, removeStaple as dbRemoveStaple,
@@ -21,6 +21,7 @@ import {
   fetchRecipeData, uploadRecipeFile, removeRecipeFile,
   THIS_WEEK,
 } from './lib/db.js';
+import { normalizeIngredient } from './lib/ingredients.js';
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -98,8 +99,10 @@ function Tags({ tags }) {
 
 // ── Recipe Detail Sheet ───────────────────────────────────────────────────────
 
-function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [], customCategories = [] }) {
+function RecipeDetailView({ recipe, onClose, onSave, onDelete, customTags = [], customCategories = [] }) {
   const [editing, setEditing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [liveRecipe, setLiveRecipe] = useState(recipe);
 
   // Edit state — initialised from recipe when editing starts
   const [eTitle,  setETitle]  = useState(recipe.title);
@@ -127,8 +130,8 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
 
   const handleSave = () => {
     if (!eTitle.trim()) return;
-    onSave({
-      ...recipe,
+    const updated = {
+      ...liveRecipe,
       title:      eTitle.trim(),
       source:     eSource.trim() || "Added manually",
       url:        eUrl.trim()    || null,
@@ -140,155 +143,171 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
       ingredients: eIngr,
       thumbnailUrl: eThumbnailUrl,
       description: eDescription || null,
-      instructions: recipe.instructions || [],
+      instructions: liveRecipe.instructions || [],
       servings: eServings || null,
-      rawIngredients: recipe.rawIngredients || [],
-    });
+      rawIngredients: liveRecipe.rawIngredients || [],
+    };
+    onSave(updated);
+    setLiveRecipe(updated);
     setEditing(false);
-    onClose();
+  };
+
+  const handleRefresh = async () => {
+    if (!liveRecipe.url || refreshing) return;
+    setRefreshing(true);
+    try {
+      const { thumbnailUrl, scrapedData } = await fetchRecipeData(liveRecipe.url);
+      const updated = { ...liveRecipe };
+      if (thumbnailUrl) updated.thumbnailUrl = thumbnailUrl;
+      if (scrapedData) {
+        if (scrapedData.title) updated.title = scrapedData.title;
+        if (scrapedData.cookTime) updated.time = scrapedData.cookTime;
+        if (scrapedData.ingredients?.length) {
+          updated.ingredients = scrapedData.ingredients;
+          updated.rawIngredients = scrapedData.ingredients;
+        }
+        if (scrapedData.instructions?.length) updated.instructions = scrapedData.instructions;
+        if (scrapedData.description) updated.description = scrapedData.description;
+        if (scrapedData.servings) updated.servings = scrapedData.servings;
+      }
+      onSave(updated);
+      setLiveRecipe(updated);
+    } catch (e) { console.error('refresh failed', e); }
+    setRefreshing(false);
   };
 
   const startEdit = () => {
-    // Re-sync edit state with latest recipe values
-    setETitle(recipe.title);
-    setESource(recipe.source);
-    setEUrl(recipe.url || "");
-    setECategory(recipe.category || "");
-    setEPdfUrl(recipe.pdfUrl || "");
-    setETime(String(recipe.time));
-    setEPrepNote(recipe.prepNote || "");
-    setETags([...recipe.tags]);
-    setEIngr([...(recipe.ingredients || [])]);
+    setETitle(liveRecipe.title);
+    setESource(liveRecipe.source);
+    setEUrl(liveRecipe.url || "");
+    setECategory(liveRecipe.category || "");
+    setEPdfUrl(liveRecipe.pdfUrl || "");
+    setETime(String(liveRecipe.time));
+    setEPrepNote(liveRecipe.prepNote || "");
+    setETags([...liveRecipe.tags]);
+    setEIngr([...(liveRecipe.ingredients || [])]);
     setEIngrInput("");
-    setEThumbnailUrl(recipe.thumbnailUrl || null);
-    setEDescription(recipe.description || null);
-    setEServings(recipe.servings || null);
+    setEThumbnailUrl(liveRecipe.thumbnailUrl || null);
+    setEDescription(liveRecipe.description || null);
+    setEServings(liveRecipe.servings || null);
     setEditing(true);
   };
 
+  const r = liveRecipe;
+
   return (
-    <div className="sheet-overlay" onClick={onClose}>
-      <div className="sheet" onClick={e => e.stopPropagation()}>
-        <div className="sheet-handle"/>
+    <div className="recipe-detail-view">
+      {/* ── Read view ── */}
+      {!editing && (<>
+        <div className="detail-topbar">
+          <button className="detail-back-btn" onClick={onClose}>← Back</button>
+        </div>
 
-        {/* ── Read view ── */}
-        {!editing && (<>
+        <div className="detail-scroll">
+          {r.thumbnailUrl && (
+            <img className="detail-hero-img" src={r.thumbnailUrl} alt=""/>
+          )}
+
           <div className="detail-hero">
-            <div className="detail-title">{recipe.title}</div>
-            <div className="detail-source">{recipe.source}</div>
+            <div className="detail-title">{r.title}</div>
+            <div className="detail-source">{r.source}</div>
             <div className="detail-meta-row">
-              <div className="detail-meta-chip">⏱ {recipe.time} min</div>
-
-              {recipe.tags.includes("fish")       && <div className="detail-meta-chip" style={{color:"#2a6a8a",background:"#eaf4fb",borderColor:"#a8cfe0"}}>🐟 Fish</div>}
-              {recipe.tags.includes("vegetarian") && <div className="detail-meta-chip" style={{color:"#4a7a46",background:"#f0f8ee",borderColor:"#b8d4b6"}}>🌿 Veg</div>}
-              {recipe.servings && <div className="detail-meta-chip">🍽 {recipe.servings} servings</div>}
+              <div className="detail-meta-chip">⏱ {r.time} min</div>
+              {r.tags.includes("fish")       && <div className="detail-meta-chip" style={{color:"#2a6a8a",background:"#eaf4fb",borderColor:"#a8cfe0"}}>🐟 Fish</div>}
+              {r.tags.includes("vegetarian") && <div className="detail-meta-chip" style={{color:"#4a7a46",background:"#f0f8ee",borderColor:"#b8d4b6"}}>🌿 Veg</div>}
+              {r.servings && <div className="detail-meta-chip">🍽 {r.servings} servings</div>}
             </div>
           </div>
 
           <div className="detail-body">
-            {recipe.prepNote && (
+            {r.prepNote && (
               <div>
                 <div className="detail-section-label">Prep note</div>
-                <div className="detail-prep-note">📋 {recipe.prepNote}</div>
+                <div className="detail-prep-note">📋 {r.prepNote}</div>
               </div>
             )}
 
-            <div>
-              <div className="detail-section-label">Recipe source</div>
-              {recipe.url ? (
-                <a className="detail-link" href={recipe.url} target="_blank" rel="noopener noreferrer">
+            {r.url && (
+              <div>
+                <div className="detail-section-label">Recipe source</div>
+                <a className="detail-link" href={r.url} target="_blank" rel="noopener noreferrer">
                   <span className="detail-link-icon">🔗</span>
                   <div className="detail-link-text">
-                    <div className="detail-link-label">{recipe.source}</div>
-                    <div className="detail-link-url">{recipe.url}</div>
+                    <div className="detail-link-label">{r.source}</div>
+                    <div className="detail-link-url">{r.url}</div>
                   </div>
                   <span className="detail-link-arrow">›</span>
                 </a>
-              ) : (
-                <div className="detail-pdf-placeholder" style={{opacity:0.5, cursor:"pointer"}} onClick={startEdit}>
-                  <span style={{fontSize:18}}>🔗</span>
-                  <span>No URL saved yet — tap Edit to add one</span>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            {recipe.ingredients && recipe.ingredients.length > 0 ? (
+            {r.ingredients && r.ingredients.length > 0 && (
               <div>
                 <div className="detail-section-label">Key ingredients</div>
                 <div style={{display:"flex", flexWrap:"wrap", gap:6}}>
-                  {recipe.ingredients.map((ing, i) => (
-                    <span key={i} style={{padding:"3px 10px", borderRadius:14, background:"var(--surface2)", border:"1px solid var(--border2)", fontSize:12, color:"var(--ink2)"}}>{ing}</span>
+                  {r.ingredients.map((ing, i) => (
+                    <span key={i} className="detail-ingredient-chip">{ing}</span>
                   ))}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div className="detail-section-label">Key ingredients</div>
-                <div className="detail-pdf-placeholder" style={{opacity:0.5, cursor:"pointer"}} onClick={startEdit}>
-                  <span style={{fontSize:18}}>🛒</span>
-                  <span>No ingredients yet — tap Edit to add them</span>
                 </div>
               </div>
             )}
 
-            {recipe.rawIngredients?.length > 0 && (
+            {r.rawIngredients?.length > 0 && (
               <div>
                 <div className="detail-section-label">Ingredients</div>
                 <ul className="detail-ingredients">
-                  {recipe.rawIngredients.map((ing, i) => <li key={i}>{ing}</li>)}
+                  {r.rawIngredients.map((ing, i) => <li key={i}>{ing}</li>)}
                 </ul>
               </div>
             )}
 
-            {recipe.instructions?.length > 0 && (
+            {r.instructions?.length > 0 && (
               <div>
                 <div className="detail-section-label">Instructions</div>
                 <ol className="detail-instructions">
-                  {recipe.instructions.map((step, i) => <li key={i}>{step}</li>)}
+                  {r.instructions.map((step, i) => <li key={i}>{step}</li>)}
                 </ol>
               </div>
             )}
 
-            <div>
-              <div className="detail-section-label">Attachment</div>
-              {recipe.pdfUrl ? (
-                /\.(jpe?g|png|gif|webp)(\?|$)/i.test(recipe.pdfUrl) ? (
-                  <a href={recipe.pdfUrl} target="_blank" rel="noopener noreferrer">
-                    <img src={recipe.pdfUrl} alt="Recipe" className="detail-attachment-img"/>
+            {r.pdfUrl && (
+              <div>
+                <div className="detail-section-label">Attachment</div>
+                {/\.(jpe?g|png|gif|webp)(\?|$)/i.test(r.pdfUrl) ? (
+                  <a href={r.pdfUrl} target="_blank" rel="noopener noreferrer">
+                    <img src={r.pdfUrl} alt="Recipe" className="detail-attachment-img"/>
                   </a>
                 ) : (
-                  <a href={recipe.pdfUrl} target="_blank" rel="noopener noreferrer" className="detail-link">
+                  <a href={r.pdfUrl} target="_blank" rel="noopener noreferrer" className="detail-link">
                     <span className="detail-link-icon">📄</span>
                     <div className="detail-link-text">
                       <div className="detail-link-label">View PDF</div>
-                      <div className="detail-link-url">{recipe.pdfUrl}</div>
+                      <div className="detail-link-url">{r.pdfUrl}</div>
                     </div>
                     <span className="detail-link-arrow">›</span>
                   </a>
-                )
-              ) : (
-                <div className="detail-pdf-placeholder" style={{opacity:0.5}}>
-                  <span style={{fontSize:18}}>📎</span>
-                  <span>No file attached — tap Edit to upload</span>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
+        </div>
 
-          <div className="detail-footer">
-            <button className="sheet-btn sheet-btn-primary" style={{flex:1}} onClick={startEdit}>Edit recipe</button>
-            <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>Close</button>
-            <button className="detail-delete-btn" onClick={() => { onDelete(recipe.id); onClose(); }}>Delete</button>
-          </div>
-        </>)}
+        <div className="detail-footer">
+          <button className="sheet-btn sheet-btn-primary" style={{flex:1}} onClick={startEdit}>Edit</button>
+          {r.url && <button className="sheet-btn sheet-btn-cancel" disabled={refreshing} onClick={handleRefresh}>{refreshing ? "Refreshing…" : "↻ Refresh"}</button>}
+          <button className="detail-delete-btn" onClick={() => { onDelete(r.id); onClose(); }}>Delete</button>
+        </div>
+      </>)}
 
-        {/* ── Edit view ── */}
-        {editing && (<>
-          <div className="sheet-header">
-            <div className="sheet-title">Edit <em>{recipe.title.split(" ").slice(0,3).join(" ")}</em></div>
-          </div>
+      {/* ── Edit view ── */}
+      {editing && (<>
+        <div className="detail-topbar">
+          <button className="detail-back-btn" onClick={() => setEditing(false)}>← Cancel</button>
+          <div style={{fontFamily:"'Playfair Display',serif", fontSize:16, color:"var(--ink)"}}>Edit <em>{r.title.split(" ").slice(0,3).join(" ")}</em></div>
+        </div>
 
-          <div className="sheet-body">
+        <div className="detail-scroll">
+          <div className="detail-body">
             <div style={{paddingBottom:8}}>
               <div className="form-field">
                 <label className="form-label">Recipe name</label>
@@ -398,13 +417,13 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
               </div>
             </div>
           </div>
+        </div>
 
-          <div className="sheet-footer">
-            <button className="sheet-btn sheet-btn-primary" disabled={!eTitle.trim()} onClick={handleSave}>Save changes</button>
-            <button className="sheet-btn sheet-btn-cancel" onClick={() => setEditing(false)}>Cancel</button>
-          </div>
-        </>)}
-      </div>
+        <div className="detail-footer">
+          <button className="sheet-btn sheet-btn-primary" style={{flex:1}} disabled={!eTitle.trim()} onClick={handleSave}>Save changes</button>
+          <button className="sheet-btn sheet-btn-cancel" onClick={() => setEditing(false)}>Cancel</button>
+        </div>
+      </>)}
     </div>
   );
 }
@@ -802,12 +821,109 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
   );
 }
 
+// ── Radar Review Sheet ───────────────────────────────────────────────────────
+// Opens after a radar item is slotted into a day (after scraping completes).
+
+function RadarReviewSheet({ radarItem, scrapedData, onConfirm, onCancel }) {
+  const [title, setTitle] = useState(scrapedData?.title || radarItem.title || "");
+  const [cookTime, setCookTime] = useState(String(scrapedData?.cookTime || radarItem.cookTime || "30"));
+  const [servings, setServings] = useState(scrapedData?.servings || radarItem.servings || "");
+  const thumbnailUrl = scrapedData?.thumbnailUrl || radarItem.thumbnailUrl || null;
+  const scrapeFailed = !scrapedData && radarItem.url;
+
+  // Build normalized ingredient list — user can remove items
+  const rawIngredients = scrapedData?.ingredients || radarItem.ingredients || [];
+  const [ingredients, setIngredients] = useState(() =>
+    rawIngredients.map(ing => ({
+      raw: ing,
+      name: normalizeIngredient(ing),
+      removed: false,
+    }))
+  );
+
+  const toggleIngredient = (idx) => {
+    setIngredients(prev => prev.map((ing, i) => i === idx ? { ...ing, removed: !ing.removed } : ing));
+  };
+
+  const handleConfirm = () => {
+    const confirmed = ingredients.filter(i => !i.removed).map(i => i.name);
+    onConfirm({
+      title: title.trim(),
+      cookTime: parseInt(cookTime) || 30,
+      servings: servings.trim() || null,
+      thumbnailUrl,
+      ingredients: confirmed,
+      rawIngredients: rawIngredients,
+      instructions: scrapedData?.instructions || radarItem.instructions || [],
+    });
+  };
+
+  return (
+    <div className="sheet-overlay" onClick={onCancel}>
+      <div className="sheet" onClick={e => e.stopPropagation()}>
+        <div className="sheet-handle"/>
+        <div className="sheet-header">
+          <div className="sheet-title">Review — <em>{radarItem.title}</em></div>
+        </div>
+
+        <div className="sheet-body">
+          {thumbnailUrl && (
+            <img src={thumbnailUrl} alt="" style={{width:"100%", height:120, objectFit:"cover", borderRadius:8, marginBottom:12}}/>
+          )}
+
+          <div className="form-field">
+            <label className="form-label">Title</label>
+            <input className="form-input" value={title} onChange={e => setTitle(e.target.value)}/>
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label className="form-label">Cook time (min)</label>
+              <input className="form-input" type="number" value={cookTime} onChange={e => setCookTime(e.target.value)}/>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Servings</label>
+              <input className="form-input" placeholder="e.g. 4" value={servings} onChange={e => setServings(e.target.value)}/>
+            </div>
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Ingredients — <span style={{fontWeight:400, color:"var(--ink4)"}}>tap to remove items you always have</span></label>
+            {ingredients.length > 0 ? (
+              <div style={{display:"flex", flexWrap:"wrap", gap:6, marginTop:4}}>
+                {ingredients.map((ing, i) => (
+                  <span key={i}
+                    className={"radar-review-pill" + (ing.removed ? " removed" : "")}
+                    onClick={() => toggleIngredient(i)}>
+                    {ing.name}
+                    {!ing.removed && <span style={{marginLeft:4, opacity:0.5}}>×</span>}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div style={{fontSize:12, color:"var(--ink4)", fontStyle:"italic", marginTop:4}}>
+                {scrapeFailed
+                  ? "Couldn't scrape ingredients — add manually after saving"
+                  : "No ingredients found"}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="sheet-footer">
+          <button className="sheet-btn sheet-btn-primary" style={{flex:1}} disabled={!title.trim()} onClick={handleConfirm}>Confirm</button>
+          <button className="sheet-btn sheet-btn-cancel" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Plan Sheet ────────────────────────────────────────────────────────────────
 // Opens when tapping any day card, stub, or the "+ Add dinner" button.
 // targetDay: the WEEK entry being edited (or null for "pick any unplanned day")
 // onClose, onSlot(dayIndex, recipe), onRemove(dayIndex), onAddRecipe(recipe)
 
-function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot, onRemove, onSlotNote, onAddRecipe, freezer, onAdjustFreezerQty, customTags = [], customCategories = [] }) {
+function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot, onSlotRadar, onRemove, onSlotNote, onAddRecipe, freezer, onAdjustFreezerQty, customTags = [], customCategories = [] }) {
   const [mode, setMode]       = useState(targetDay?.recipe ? "pick" : "pick");
   const [search, setSearch]   = useState("");
   const [newTitle, setNewTitle]         = useState("");
@@ -828,6 +944,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
   const [deductPrompt, setDeductPrompt] = useState(null);
   const [noteText, setNoteText] = useState(targetDay?.note || "");
+  const [radarOpen, setRadarOpen] = useState(false);
   // deductPrompt: { recipe, matches: [{freezerItem, qty}] }
 
   const filtered = recipes.filter(r =>
@@ -960,10 +1077,10 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
         <div className="sheet-mode-toggle">
           <button className={"sheet-mode-btn" + (mode==="pick" ? " active" : "")} onClick={() => setMode("pick")}>
-            Choose recipe
+            From library
           </button>
           <button className={"sheet-mode-btn" + (mode==="note" ? " active" : "")} onClick={() => setMode("note")}>
-            Add non-recipe
+            Add note
           </button>
           <button className={"sheet-mode-btn" + (mode==="new" ? " active" : "")} onClick={() => setMode("new")}>
             New recipe
@@ -1003,17 +1120,38 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
               </div>
             ))}
 
-            {filtered.length === 0 && (
+            {filtered.length === 0 && !radar?.length && (
               <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic"}}>
                 No recipes match "{search}"
               </div>
             )}
+
+            {/* Radar items in From Library mode */}
+            {radar && radar.length > 0 && (() => {
+              const filteredRadar = radar.filter(item =>
+                search === "" || item.title.toLowerCase().includes(search.toLowerCase())
+              );
+              if (!filteredRadar.length) return null;
+              return (<>
+                <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginTop:12, marginBottom:6}}>From radar</div>
+                {filteredRadar.map(item => (
+                  <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => { onSlotRadar(dayIndex, item); onClose(); }}>
+                    <div className="pick-thumb" style={{background:"var(--accent-pale)", color:"var(--accent)"}}>✦</div>
+                    <div style={{flex:1, minWidth:0}}>
+                      <div className="pick-recipe-title">{item.title}</div>
+                      <div className="pick-recipe-meta">{item.source || "Radar"}{item.cookTime ? ` · ${item.cookTime} min` : ""}</div>
+                    </div>
+                    <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
+                  </div>
+                ))}
+              </>);
+            })()}
           </>)}
 
           {mode === "note" && (
             <div style={{padding:"8px 0"}}>
               <div className="form-field">
-                <label className="form-label">What's for dinner?</label>
+                <label className="form-label">What's the plan?</label>
                 <input
                   className="form-input"
                   placeholder="e.g. cheese omelette and salad"
@@ -1040,8 +1178,11 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
             <div style={{paddingBottom:8}}>
               {radar && radar.length > 0 && (
                 <div style={{marginBottom:14}}>
-                  <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:6}}>From radar</div>
-                  {radar.map(item => (
+                  <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:6, cursor:"pointer", userSelect:"none", display:"flex", alignItems:"center", gap:4}} onClick={() => setRadarOpen(o => !o)}>
+                    From radar
+                    <span style={{fontSize:8, transition:"transform 0.2s", display:"inline-block", transform: radarOpen ? "rotate(0deg)" : "rotate(-90deg)"}}>▼</span>
+                  </div>
+                  {radarOpen && radar.map(item => (
                     <div key={item.id}
                       onMouseDown={e => { e.preventDefault(); setNewTitle(item.title); setNewUrl(item.url || ""); }}
                       style={{display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border2)", cursor:"pointer"}}>
@@ -1049,9 +1190,10 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
                       {item.url && <span style={{fontSize:10, color:"var(--ink4)"}}>↗</span>}
                     </div>
                   ))}
-                  <div style={{height:12}}/>
+                  {radarOpen && <div style={{height:12}}/>}
                 </div>
               )}
+              <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:8}}>From web</div>
               <div className="form-field">
                 <label className="form-label">Recipe name</label>
                 <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
@@ -1182,28 +1324,36 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
 // ── Day Card & Stub ───────────────────────────────────────────────────────────
 
-function DayCard({ d, today, onClick, onDetail, readyBy }) {
-  const start = calcStart(readyBy, d.recipe.time);
-  const recipeLink = d.recipe.pdfUrl || d.recipe.url || null;
+function DayCard({ d, today, onClick, onDetail, readyBy, scraping }) {
+  const time = d.recipe?.time || d.radarCookTime || 30;
+  const title = d.recipe?.title || d.radarTitle || "Untitled";
+  const thumb = d.recipe?.thumbnailUrl || d.radarThumbnailUrl || null;
+  const source = d.recipe?.source || null;
+  const recipeLink = d.recipe ? (d.recipe.pdfUrl || d.recipe.url || null) : null;
+  const start = calcStart(readyBy, time);
+  const isRadar = d.isRadar && !d.recipe;
   return (
-    <div className={"day-card" + (today ? " today" : "")} onClick={() => onDetail(d.recipe)}>
-      {d.recipe.thumbnailUrl && <img className="day-card-thumb" src={d.recipe.thumbnailUrl} alt="" />}
+    <div className={"day-card" + (today ? " today" : "")} onClick={() => d.recipe ? onDetail(d.recipe) : onClick()}>
+      {thumb && <img className="day-card-thumb" src={thumb} alt="" />}
+      {scraping && <div className="day-card-loading"/>}
       <button className="day-card-swap" title="Change recipe"
         onClick={e => { e.stopPropagation(); onClick(); }}>⇄</button>
       <div className="day-name">{d.day}</div>
       <div className="day-recipe-block">
-        <div className="day-recipe-name">{d.recipe.title}</div>
+        <div className="day-recipe-name">{title}</div>
         {recipeLink ? (
           <a className="day-source linked" href={recipeLink} target="_blank" rel="noopener noreferrer"
             onClick={e => e.stopPropagation()}>
-            {d.recipe.source}<span className="source-arrow"> ↗</span>
+            {source}<span className="source-arrow"> ↗</span>
           </a>
-        ) : (
-          <div className="day-source">{d.recipe._unsaved ? <em style={{color:"var(--ink4)"}}>not saved</em> : d.recipe.source}</div>
-        )}
+        ) : source ? (
+          <div className="day-source">{d.recipe?._unsaved ? <em style={{color:"var(--ink4)"}}>not saved</em> : source}</div>
+        ) : isRadar ? (
+          <div className="day-source"><em style={{color:"var(--accent)"}}>from radar</em></div>
+        ) : null}
         <div className="day-recipe-meta">
           <span className="day-time">start {start}</span>
-          <span className="day-duration">· {d.recipe.time}m</span>
+          <span className="day-duration">· {time}m</span>
         </div>
       </div>
     </div>
@@ -1255,6 +1405,7 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
   const [newInstructions, setNewInstructions] = useState([]);
   const [newRawIngredients, setNewRawIngredients] = useState([]);
   const [saveToLibrary, setSaveToLibrary] = useState(false);
+  const [radarOpen, setRadarOpen] = useState(false);
 
   const filtered = recipes.filter(r =>
     search === "" || r.title.toLowerCase().includes(search.toLowerCase())
@@ -1317,10 +1468,10 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
 
         <div className="sheet-mode-toggle">
           <button className={"sheet-mode-btn" + (mode==="pick" ? " active" : "")} onClick={() => setMode("pick")}>
-            Choose recipe
+            From library
           </button>
           <button className={"sheet-mode-btn" + (mode==="note" ? " active" : "")} onClick={() => setMode("note")}>
-            Add non-recipe
+            Add note
           </button>
           <button className={"sheet-mode-btn" + (mode==="new" ? " active" : "")} onClick={() => setMode("new")}>
             New recipe
@@ -1351,7 +1502,7 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
           {mode === "note" && (
             <div style={{padding:"8px 0"}}>
               <div className="form-field">
-                <label className="form-label">What are you prepping?</label>
+                <label className="form-label">What's the plan?</label>
                 <input
                   className="form-input"
                   placeholder="e.g. chicken stock, granola bars"
@@ -1370,8 +1521,11 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
             <div style={{paddingBottom:8}}>
               {radar && radar.length > 0 && (
                 <div style={{marginBottom:14}}>
-                  <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:6}}>From radar</div>
-                  {radar.map(item => (
+                  <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:6, cursor:"pointer", userSelect:"none", display:"flex", alignItems:"center", gap:4}} onClick={() => setRadarOpen(o => !o)}>
+                    From radar
+                    <span style={{fontSize:8, transition:"transform 0.2s", display:"inline-block", transform: radarOpen ? "rotate(0deg)" : "rotate(-90deg)"}}>▼</span>
+                  </div>
+                  {radarOpen && radar.map(item => (
                     <div key={item.id}
                       onMouseDown={e => { e.preventDefault(); setNewTitle(item.title); setNewUrl(item.url || ""); }}
                       style={{display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border2)", cursor:"pointer"}}>
@@ -1379,9 +1533,10 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
                       {item.url && <span style={{fontSize:10, color:"var(--ink4)"}}>↗</span>}
                     </div>
                   ))}
-                  <div style={{height:12}}/>
+                  {radarOpen && <div style={{height:12}}/>}
                 </div>
               )}
+              <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:8}}>From web</div>
               <div className="form-field">
                 <label className="form-label">Recipe name</label>
                 <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
@@ -1508,8 +1663,11 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   const fridgeNames   = (fridge  || []).map(i => i.item.toLowerCase());
   const stapleShopItems = staples.filter(s => s.status === "restock").map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock" }));
   const recipeItems = (week || [])
-    .filter(d => d.recipe?.ingredients?.length)
-    .flatMap(d => d.recipe.ingredients.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing })))
+    .filter(d => d.recipe?.ingredients?.length || d.radarIngredients?.length)
+    .flatMap(d => {
+      const ings = d.recipe?.ingredients?.length ? d.recipe.ingredients : (d.radarIngredients || []);
+      return ings.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing }));
+    })
     .filter(item => !okStapleNames.includes(item.text.toLowerCase()) && !freezerNames.includes(item.text.toLowerCase()) && !fridgeNames.includes(item.text.toLowerCase()));
   const deduped = []; const seen = {};
   recipeItems.forEach(item => {
@@ -1564,7 +1722,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 // ── Week View ─────────────────────────────────────────────────────────────────
 
 function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
-  batch, prepTasks, prepChecked, onSlot, onRemove, onSlotNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset,
+  batch, prepTasks, prepChecked, onSlot, onSlotRadar, onRemove, onSlotNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onUpdateRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
   onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty }) {
   const [shopOpen, setShopOpen]     = useState(true);
@@ -1574,6 +1732,8 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
   const [sheet, setSheet]           = useState(null);
   const [weekDetail, setWeekDetail] = useState(null);
   const [batchDetail, setBatchDetail] = useState(null);
+  const [radarReview, setRadarReview] = useState(null); // { dayIndex, radarItem, scrapedData, loading }
+  const [scrapingDays, setScrapingDays] = useState({}); // dayIndex → true while scraping
 
   // Derived: one prep item per planned recipe that has a prepNote
   const recipePrepItems = week
@@ -1597,6 +1757,65 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
   const handleRemove = (dayIndex) => { onRemove(dayIndex); };
   const handleSlotNote = (dayIndex, note) => { onSlotNote(dayIndex, note); };
   const handleAddRecipe = (recipe) => { onAddRecipe(recipe); };
+
+  const handleSlotRadar = async (dayIndex, radarItem) => {
+    // Optimistic slot with title only
+    onSlotRadar(dayIndex, radarItem, { title: radarItem.title });
+
+    if (radarItem.scrapedAt) {
+      // Already scraped — go straight to review
+      setRadarReview({ dayIndex, radarItem, scrapedData: null });
+    } else if (radarItem.url) {
+      // Scrape first
+      setScrapingDays(s => ({ ...s, [dayIndex]: true }));
+      let scrapedData = null;
+      try {
+        const result = await fetchRecipeData(radarItem.url);
+        scrapedData = {
+          title: result.scrapedData?.title || radarItem.title,
+          cookTime: result.scrapedData?.cookTime || null,
+          ingredients: result.scrapedData?.ingredients || [],
+          instructions: result.scrapedData?.instructions || [],
+          servings: result.scrapedData?.servings || null,
+          thumbnailUrl: result.thumbnailUrl || null,
+        };
+      } catch (e) { console.error('radar scrape failed', e); }
+      setScrapingDays(s => { const n = { ...s }; delete n[dayIndex]; return n; });
+      setRadarReview({ dayIndex, radarItem, scrapedData });
+    } else {
+      // No URL — open review with just the title
+      setRadarReview({ dayIndex, radarItem, scrapedData: null });
+    }
+  };
+
+  const handleRadarReviewConfirm = (confirmed) => {
+    if (!radarReview) return;
+    const { dayIndex, radarItem } = radarReview;
+    // Update the week slot with confirmed data
+    onSlotRadar(dayIndex, radarItem, {
+      title: confirmed.title,
+      cookTime: confirmed.cookTime,
+      thumbnailUrl: confirmed.thumbnailUrl,
+      ingredients: confirmed.ingredients,
+    });
+    // Save scraped data back to radar item
+    onUpdateRadar(radarItem.id, {
+      thumbnailUrl: confirmed.thumbnailUrl,
+      cookTime: confirmed.cookTime,
+      ingredients: confirmed.rawIngredients,
+      instructions: confirmed.instructions,
+      servings: confirmed.servings,
+      scrapedAt: new Date().toISOString(),
+    });
+    setRadarReview(null);
+  };
+
+  const handleRadarReviewCancel = () => {
+    if (radarReview) {
+      onRemove(radarReview.dayIndex);
+    }
+    setRadarReview(null);
+  };
 
   const handleAddBatch = (recipe) => { onAddBatch(recipe); };
 
@@ -1658,8 +1877,11 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
       {(() => {
         if (!fridge) return null;
         const weekIngredients = week
-          .filter(d => d.recipe?.ingredients?.length)
-          .flatMap(d => d.recipe.ingredients.map(i => i.toLowerCase()));
+          .filter(d => d.recipe?.ingredients?.length || d.radarIngredients?.length)
+          .flatMap(d => {
+            const ings = d.recipe?.ingredients?.length ? d.recipe.ingredients : (d.radarIngredients || []);
+            return ings.map(i => i.toLowerCase());
+          });
         const unaccounted = fridge.filter(i =>
           i.s === "soon" &&
           !weekIngredients.includes(i.item.toLowerCase())
@@ -1682,16 +1904,16 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
 
       <div className="week-section">
         <div className="week-row">
-          {row1.map((d, i) => d.recipe
-            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} />
+          {row1.map((d, i) => (d.recipe || d.isRadar)
+            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} scraping={scrapingDays[i]} />
             : d.note
             ? <DayNote key={i} d={d} today={false} onClick={() => openSheet(i)} />
             : <DayStub key={i} d={d} today={false} onClick={() => openSheet(i)} />
           )}
         </div>
         <div className="week-row" style={{marginTop:8}}>
-          {row2.map((d, i) => d.recipe
-            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i + 4)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} />
+          {row2.map((d, i) => (d.recipe || d.isRadar)
+            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i + 4)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} scraping={scrapingDays[i + 4]} />
             : d.note
             ? <DayNote key={i} d={d} today={false} onClick={() => openSheet(i + 4)} />
             : <DayStub key={i} d={d} today={false} onClick={() => openSheet(i + 4)} />
@@ -1810,34 +2032,42 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
       )}
 
       {weekDetail && (
-        <RecipeDetailSheet
-          recipe={weekDetail}
-          onClose={() => setWeekDetail(null)}
-          onSave={updated => {
-            onUpdateRecipe(updated);
-            setWeekDetail(null);
-          }}
-          onDelete={id => {
-            onDeleteRecipe(id);
-            setWeekDetail(null);
-          }}
-          customTags={customTags} customCategories={customCategories}
-        />
+        <div className="sheet-overlay">
+          <div className="detail-overlay-panel" onClick={e => e.stopPropagation()}>
+            <RecipeDetailView
+              recipe={weekDetail}
+              onClose={() => setWeekDetail(null)}
+              onSave={updated => {
+                onUpdateRecipe(updated);
+                setWeekDetail(updated);
+              }}
+              onDelete={id => {
+                onDeleteRecipe(id);
+                setWeekDetail(null);
+              }}
+              customTags={customTags} customCategories={customCategories}
+            />
+          </div>
+        </div>
       )}
       {batchDetail && (
-        <RecipeDetailSheet
-          recipe={batchDetail}
-          onClose={() => setBatchDetail(null)}
-          onSave={updated => {
-            onUpdateRecipe(updated);
-            setBatchDetail(null);
-          }}
-          onDelete={id => {
-            onDeleteRecipe(id);
-            setBatchDetail(null);
-          }}
-          customTags={customTags} customCategories={customCategories}
-        />
+        <div className="sheet-overlay">
+          <div className="detail-overlay-panel" onClick={e => e.stopPropagation()}>
+            <RecipeDetailView
+              recipe={batchDetail}
+              onClose={() => setBatchDetail(null)}
+              onSave={updated => {
+                onUpdateRecipe(updated);
+                setBatchDetail(updated);
+              }}
+              onDelete={id => {
+                onDeleteRecipe(id);
+                setBatchDetail(null);
+              }}
+              customTags={customTags} customCategories={customCategories}
+            />
+          </div>
+        </div>
       )}
       {sheet !== null && sheet.mode !== 'batch' && (
         <PlanSheet
@@ -1848,6 +2078,7 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           radar={radar}
           onClose={closeSheet}
           onSlot={handleSlot}
+          onSlotRadar={handleSlotRadar}
           onRemove={handleRemove}
           onAddRecipe={handleAddRecipe}
           freezer={freezer}
@@ -1866,6 +2097,14 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           onAddRecipe={onAddRecipe}
           customTags={customTags}
           customCategories={customCategories}
+        />
+      )}
+      {radarReview && (
+        <RadarReviewSheet
+          radarItem={radarReview.radarItem}
+          scrapedData={radarReview.scrapedData}
+          onConfirm={handleRadarReviewConfirm}
+          onCancel={handleRadarReviewCancel}
         />
       )}
     </div>
@@ -1938,6 +2177,22 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
     setPromotingRadar(item);
     setRadarDetail(null);
   };
+
+  if (detail) return (
+    <RecipeDetailView
+      recipe={detail}
+      onClose={() => setDetail(null)}
+      onSave={updated => {
+        onUpdateRecipe(updated);
+        setDetail(updated);
+      }}
+      onDelete={id => {
+        onDeleteRecipe(id);
+        setDetail(null);
+      }}
+      customTags={customTags} customCategories={customCategories}
+    />
+  );
 
   return (
     <div className="tab-section">
@@ -2040,21 +2295,6 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
           );
         });
       })()}
-      {detail && (
-        <RecipeDetailSheet
-          recipe={detail}
-          onClose={() => setDetail(null)}
-          onSave={updated => {
-            onUpdateRecipe(updated);
-            setDetail(null);
-          }}
-          onDelete={id => {
-            onDeleteRecipe(id);
-            setDetail(null);
-          }}
-          customTags={customTags} customCategories={customCategories}
-        />
-      )}
       {radarDetail && (
         <RadarDetailSheet
           item={radarDetail}
@@ -2463,20 +2703,26 @@ export default function App() {
   };
 
   // ── Week handlers ──
+  const CLEAR_RADAR = { isRadar: false, radarTitle: null, radarCookTime: null, radarThumbnailUrl: null, radarIngredients: null };
   const handleSlot = async (dayIndex, recipe) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe, note: null} : d));
-    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: recipe.id, note: null }); } catch (e) { console.error(e); }
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe, note: null, ...CLEAR_RADAR} : d));
+    if (recipe._unsaved) {
+      // Unsaved recipes don't have a real DB id — store as radar-style entry
+      try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null, radarTitle: recipe.title, cookTime: recipe.time || null, thumbnailUrl: recipe.thumbnailUrl || null, ingredients: recipe.ingredients || null }); } catch (e) { console.error(e); }
+    } else {
+      try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: recipe.id, note: null, radarTitle: null, cookTime: null, thumbnailUrl: null, ingredients: null }); } catch (e) { console.error(e); }
+    }
   };
   const handleRemove = async (dayIndex) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: null, note: null} : d));
-    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null }); } catch (e) { console.error(e); }
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: null, note: null, ...CLEAR_RADAR} : d));
+    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null, radarTitle: null, cookTime: null, thumbnailUrl: null, ingredients: null }); } catch (e) { console.error(e); }
   };
   const handleSlotNote = async (dayIndex, note) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, note: note.trim() || null, recipe: null} : d));
-    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: note.trim() || null }); } catch (e) { console.error(e); }
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, note: note.trim() || null, recipe: null, ...CLEAR_RADAR} : d));
+    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: note.trim() || null, radarTitle: null, cookTime: null, thumbnailUrl: null, ingredients: null }); } catch (e) { console.error(e); }
   };
   const handleWeekReset = async () => {
-    setWeek(DAY_NAMES.map(day => ({ day, recipe: null, note: null })));
+    setWeek(DAY_NAMES.map(day => ({ day, recipe: null, note: null, ...CLEAR_RADAR })));
     setBatch([]);
     setRegChecked({});
     try { await clearWeekPlan(THIS_WEEK); await clearBatchPrep(THIS_WEEK); } catch (e) { console.error(e); }
@@ -2502,6 +2748,34 @@ export default function App() {
   const handleRemoveRadar = async (id) => {
     setRadar(r => r.filter(x => x.id !== id));
     try { await dbRemoveRadarItem(id); } catch (e) { console.error(e); }
+  };
+  const handleSlotRadar = async (dayIndex, radarItem, confirmed) => {
+    // Update week state with radar data
+    setWeek(w => w.map((d, i) => i === dayIndex ? {
+      ...d,
+      recipe: null,
+      note: null,
+      isRadar: true,
+      radarTitle: confirmed.title || radarItem.title,
+      radarCookTime: confirmed.cookTime || radarItem.cookTime || null,
+      radarThumbnailUrl: confirmed.thumbnailUrl || radarItem.thumbnailUrl || null,
+      radarIngredients: confirmed.ingredients || null,
+    } : d));
+    // Persist to week_plan (no recipe_id, store data directly)
+    try {
+      await upsertWeekDay(THIS_WEEK, dayIndex, {
+        recipeId: null,
+        note: null,
+        radarTitle: confirmed.title || radarItem.title,
+        cookTime: confirmed.cookTime || radarItem.cookTime || null,
+        thumbnailUrl: confirmed.thumbnailUrl || radarItem.thumbnailUrl || null,
+        ingredients: confirmed.ingredients || null,
+      });
+    } catch (e) { console.error(e); }
+  };
+  const handleUpdateRadar = async (id, fields) => {
+    setRadar(r => r.map(item => item.id === id ? { ...item, ...fields } : item));
+    try { await dbUpdateRadarItem(id, fields); } catch (e) { console.error(e); }
   };
 
   // ── Prefs handler ──
@@ -2684,7 +2958,7 @@ export default function App() {
   const views = {
     week:    <WeekView goals={goals} week={week} recipes={recipes} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} staples={staples} regulars={regulars} regChecked={regChecked} shopChecked={shopChecked} freeShop={freeShop} radar={radar} customTags={customTags} customCategories={customCategories}
       batch={batch} prepTasks={prepTasks} prepChecked={prepChecked}
-      onSlot={handleSlot} onRemove={handleRemove} onSlotNote={handleSlotNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset}
+      onSlot={handleSlot} onSlotRadar={handleSlotRadar} onRemove={handleRemove} onSlotNote={handleSlotNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onUpdateRadar={handleUpdateRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
       onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop}

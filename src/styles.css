@@ -261,26 +261,45 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .deduct-row-name { flex: 1; font-size: 13px; color: var(--ink2); }
 .deduct-row-current { font-size: 10.5px; color: var(--ink4); }
 
-/* ── Recipe detail sheet ── */
-.detail-hero { padding: 22px 20px 16px; border-bottom: 1px solid var(--border2); flex-shrink: 0; }
-.detail-title { font-family: 'Playfair Display', serif; font-size: 22px; font-weight: 400; color: var(--ink); line-height: 1.2; margin-bottom: 4px; }
-.detail-source { font-size: 12px; color: var(--ink3); font-style: italic; }
+/* ── Radar review pills ── */
+.radar-review-pill { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 14px; font-size: 13px; color: var(--ink2); background: var(--surface2); border: 1px solid var(--border2); cursor: pointer; transition: all 0.15s; user-select: none; }
+.radar-review-pill:hover { border-color: var(--ink4); }
+.radar-review-pill.removed { text-decoration: line-through; opacity: 0.4; background: transparent; border-style: dashed; }
+
+/* ── Day card radar loading ── */
+.day-card-loading { position: absolute; top: 4px; right: 4px; width: 14px; height: 14px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Recipe detail view (full-screen) ── */
+@keyframes detail-slide-in { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+.recipe-detail-view { display: flex; flex-direction: column; height: 100%; background: var(--surface); animation: detail-slide-in 0.25s ease-out; }
+.detail-topbar { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border2); flex-shrink: 0; }
+.detail-back-btn { background: none; border: none; font-family: 'Lato', sans-serif; font-size: 14px; font-weight: 700; color: var(--accent); cursor: pointer; padding: 4px 0; }
+.detail-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.detail-hero-img { width: 100%; max-height: 280px; object-fit: cover; display: block; }
+.detail-hero { padding: 22px 20px 16px; }
+.detail-title { font-family: 'Playfair Display', serif; font-size: 26px; font-weight: 400; color: var(--ink); line-height: 1.2; margin-bottom: 4px; }
+.detail-source { font-size: 13px; color: var(--ink3); font-style: italic; }
 .detail-meta-row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
-.detail-meta-chip { display: flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; background: var(--surface2); color: var(--ink3); border: 1px solid var(--border2); }
-.detail-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
-.detail-section-label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink4); font-weight: 700; margin-bottom: 6px; }
-.detail-prep-note { font-size: 13px; color: var(--ink2); line-height: 1.5; padding: 10px 12px; background: var(--accent-pale); border: 1px solid var(--accent-light); border-radius: 8px; }
+.detail-meta-chip { display: flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 6px; font-size: 13px; font-weight: 700; background: var(--surface2); color: var(--ink3); border: 1px solid var(--border2); }
+.detail-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; }
+.detail-section-label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink4); font-weight: 700; margin-bottom: 8px; }
+.detail-prep-note { font-size: 14px; color: var(--ink2); line-height: 1.5; padding: 10px 12px; background: var(--accent-pale); border: 1px solid var(--accent-light); border-radius: 8px; }
+.detail-ingredient-chip { padding: 4px 12px; border-radius: 14px; background: var(--surface2); border: 1px solid var(--border2); font-size: 15px; color: var(--ink2); }
 .detail-link { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; text-decoration: none; color: var(--ink2); transition: background 0.15s; cursor: pointer; }
 .detail-link:hover { background: var(--surface3); }
 .detail-link-icon { font-size: 18px; flex-shrink: 0; }
 .detail-link-text { flex: 1; min-width: 0; }
-.detail-link-label { font-size: 12px; font-weight: 700; color: var(--ink2); }
-.detail-link-url { font-size: 10px; color: var(--ink4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.detail-link-label { font-size: 13px; font-weight: 700; color: var(--ink2); }
+.detail-link-url { font-size: 11px; color: var(--ink4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .detail-link-arrow { color: var(--ink4); font-size: 18px; flex-shrink: 0; }
 .detail-pdf-placeholder { display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--surface2); border: 1.5px dashed var(--border); border-radius: 8px; color: var(--ink4); font-size: 12px; }
 .detail-footer { padding: 12px 20px; border-top: 1px solid var(--border2); flex-shrink: 0; display: flex; gap: 8px; }
 .detail-delete-btn { padding: 10px 16px; border-radius: 10px; border: 1px solid var(--border); background: transparent; font-family: 'Lato', sans-serif; font-size: 12px; font-weight: 700; color: var(--ink4); cursor: pointer; transition: all 0.15s; }
 .detail-delete-btn:hover { background: #fdecea; color: #c0392b; border-color: #f0b8b0; }
+/* Overlay panel for week/batch detail */
+.sheet-overlay:has(.detail-overlay-panel) { align-items: stretch; }
+.detail-overlay-panel { width: 100%; max-width: 430px; margin: 0 auto; background: var(--surface); }
 
 /* ── Recipes tab ── */
 .tab-section { padding: 18px; }
@@ -418,10 +437,11 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .detail-upload-btn:hover { background: var(--surface3); border-color: var(--ink4); }
 
 /* ── Detail ingredients & instructions ── */
-.detail-ingredients { padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--ink2); list-style: disc; }
-.detail-ingredients li { margin-bottom: 3px; }
-.detail-instructions { padding-left: 20px; font-size: 13px; line-height: 1.6; color: var(--ink2); }
-.detail-instructions li { margin-bottom: 6px; }
+.detail-ingredients { padding-left: 22px; font-size: 15px; line-height: 1.7; color: var(--ink2); list-style: disc; }
+.detail-ingredients li { margin-bottom: 4px; }
+.detail-instructions { padding-left: 0; font-size: 15px; line-height: 1.7; color: var(--ink2); list-style: none; counter-reset: step; }
+.detail-instructions li { margin-bottom: 10px; counter-increment: step; display: flex; gap: 12px; }
+.detail-instructions li::before { content: counter(step); display: flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border-radius: 50%; background: var(--surface2); border: 1px solid var(--border2); font-size: 14px; font-weight: 700; color: var(--ink3); flex-shrink: 0; }
 
 /* ── Day card thumbnail ── */
 .day-card-thumb { width: calc(100% + 20px); height: 48px; object-fit: cover; margin: -10px -10px 6px; display: block; }
