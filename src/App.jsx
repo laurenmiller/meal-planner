@@ -733,8 +733,8 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
   const stockedStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
   const allFilterNames = [...new Set([...stockedStapleNames, ...shopFilters])];
   const isFiltered = (text) => allFilterNames.some(s => normalizeIngredient(text).toLowerCase().includes(s));
-  const mainItems = allDeduped.filter(item => !isFiltered(item.text) || unfilteredIds.has(item.id));
-  const filteredItems = allDeduped.filter(item => isFiltered(item.text) && !unfilteredIds.has(item.id));
+  const mainItems = allDeduped.filter(item => item.source === "restock" || !isFiltered(item.text) || unfilteredIds.has(item.id));
+  const filteredItems = allDeduped.filter(item => item.source !== "restock" && isFiltered(item.text) && !unfilteredIds.has(item.id));
 
   // Duplicate detection among main items
   const dupMap = findDuplicates(mainItems);
@@ -1755,8 +1755,8 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   const stockedStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
   const allFilterNames = [...new Set([...stockedStapleNames, ...shopFilters])];
   const isFiltered = (text) => allFilterNames.some(s => normalizeIngredient(text).toLowerCase().includes(s));
-  const mainItems = allDeduped.filter(item => !isFiltered(item.text) || unfilteredIds.has(item.id));
-  const filteredItems = allDeduped.filter(item => isFiltered(item.text) && !unfilteredIds.has(item.id));
+  const mainItems = allDeduped.filter(item => item.source === "restock" || !isFiltered(item.text) || unfilteredIds.has(item.id));
+  const filteredItems = allDeduped.filter(item => item.source !== "restock" && isFiltered(item.text) && !unfilteredIds.has(item.id));
 
   // Duplicate detection among main items
   const dupMap = findDuplicates(mainItems);
