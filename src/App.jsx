@@ -2964,15 +2964,50 @@ export default function App() {
 
   // Re-fetch data and re-establish realtime when app returns from background
   useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible') {
-        try { await loadAllData(); } catch (e) { console.error('visibility refresh failed', e); }
-        supabase.removeAllChannels();
-        setupRealtimeSubscriptions();
-      }
+    let reconnecting = false;
+    const reconnect = async () => {
+      if (reconnecting) return;
+      reconnecting = true;
+      try { await loadAllData(); } catch (e) { console.error('reconnect refresh failed', e); }
+      supabase.removeAllChannels();
+      setupRealtimeSubscriptions();
+      reconnecting = false;
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') reconnect();
+    };
+    const handleFocus = () => reconnect();
+    const handlePageShow = () => reconnect();
+    const handleOnline = () => reconnect();
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('online', handleOnline);
+
+    // Polling fallback for standalone PWA mode
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    let pollInterval = null;
+    if (isStandalone) {
+      pollInterval = setInterval(() => {
+        const channels = supabase.getChannels();
+        const hasStale = channels.length === 0 || channels.some(ch => ch.state !== 'joined');
+        if (hasStale) {
+          supabase.removeAllChannels();
+          setupRealtimeSubscriptions();
+        }
+      }, 30000);
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('online', handleOnline);
+      if (pollInterval) clearInterval(pollInterval);
+    };
   }, []);
 
   // ── Recipe handlers ──
