@@ -20,9 +20,11 @@ import {
   fetchPrepTasks, addPrepTask as dbAddPrepTask, updatePrepTask as dbUpdatePrepTask,
   fetchPrepChecked, togglePrepChecked as dbTogglePrepChecked,
   fetchRecipeData, uploadRecipeFile, removeRecipeFile,
+  fetchShopSectionKeywords, addShopSectionKeyword as dbAddShopSectionKeyword, removeShopSectionKeyword as dbRemoveShopSectionKeyword,
   THIS_WEEK,
 } from './lib/db.js';
 import { normalizeIngredient, findDuplicates } from './lib/ingredients.js';
+import { SHOP_SECTIONS, DEFAULT_SECTION_KEYWORDS, getSectionForIngredient } from './lib/shopSections.js';
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -682,7 +684,7 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
 // ── Shopping Sheet ────────────────────────────────────────────────────────────
 
 function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAddRegular, onRemoveRegular,
-  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters }) {
+  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters, shopSectionKeywords }) {
 
   const [freeInput, setFreeInput] = useState("");
   const [regularInput, setRegularInput] = useState("");
@@ -826,17 +828,30 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
             <button className="pantry-add-btn" disabled={!regularInput.trim()} onClick={() => addReg(regularInput)} style={{fontSize:11,padding:"6px 10px"}}>Add</button>
           </div>
 
-          {/* This week */}
-          <div className="shop-sheet-group-label">This week's recipes</div>
+          {/* This week — grouped by supermarket section */}
           {recipeUnchecked.length === 0 && recipeChecked.length === 0 && freeShop.length === 0 && filteredItems.length === 0 ? (
             <div style={{padding:"10px 20px", color:"var(--ink4)", fontSize:12, fontStyle:"italic"}}>
               Plan dinners to auto-populate ingredients here.
             </div>
           ) : (
-            <div className="shop-col-grid">
-              {recipeUnchecked.map(item => renderRecipeRow(item, false))}
-              {recipeChecked.map(item => renderRecipeRow(item, true))}
-            </div>
+            (() => {
+              const allItems = [...recipeUnchecked.map(i => ({...i, _checked: false})), ...recipeChecked.map(i => ({...i, _checked: true}))];
+              const grouped = {};
+              allItems.forEach(item => {
+                const sec = getSectionForIngredient(item.text, shopSectionKeywords);
+                if (!grouped[sec]) grouped[sec] = [];
+                grouped[sec].push(item);
+              });
+              return SHOP_SECTIONS.filter(s => grouped[s.id]?.length).map(s => (
+                <div key={s.id}>
+                  <div className="shop-section-header">{s.label}</div>
+                  <div className="shop-col-grid">
+                    {grouped[s.id].filter(i => !i._checked).map(item => renderRecipeRow(item, false))}
+                    {grouped[s.id].filter(i => i._checked).map(item => renderRecipeRow(item, true))}
+                  </div>
+                </div>
+              ));
+            })()
           )}
           {filteredItems.length > 0 && (
             <details className="filtered-section" style={{padding:"0 12px 6px"}}>
@@ -1732,7 +1747,7 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
 }
 
 // ── Inline Shopping List (week tab) ──────────────────────────────────────────
-function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters }) {
+function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters, shopSectionKeywords }) {
   const [freeInput, setFreeInput] = useState("");
   const [unfilteredIds, setUnfilteredIds] = useState(new Set());
   const [dismissedIds, setDismissedIds] = useState(new Set());
@@ -1799,35 +1814,45 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
           ))}
         </div>
       </>}
-      {mainItems.length > 0 && <>
-        <div className="week-shop-group-label">This week</div>
-        <div className="week-shop-pills">
-          {mainItems.map(item => {
-            const isDup = dupMap.has(item.id);
-            const isChecked = shopChecked[item.id] || item.done;
-            const wasUnfiltered = unfilteredIds.has(item.id);
-            return (
-              <span key={item.id} style={{position:"relative"}}>
-                <span className={"shop-pill" + (isDup ? " duplicate" : "") + (isChecked ? " done" : "")}
-                  onClick={(e) => {
-                    if (isDup && !isChecked) { e.stopPropagation(); setPopoverId(popoverId === item.id ? null : item.id); }
-                    else toggleItem(item);
-                  }}>
-                  {item.text}
-                  {wasUnfiltered && !isChecked && <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }}>↩</button>}
-                  <button className="pill-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>
-                </span>
-                {popoverId === item.id && dupMap.get(item.id) && (
-                  <span className="dup-popover" onClick={e => e.stopPropagation()}>
-                    Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
-                    <br/><span style={{fontSize:10, color:"var(--ink4)"}}>Tap pill again to check off</span>
+      {mainItems.length > 0 && (() => {
+        const grouped = {};
+        mainItems.forEach(item => {
+          const sec = getSectionForIngredient(item.text, shopSectionKeywords);
+          if (!grouped[sec]) grouped[sec] = [];
+          grouped[sec].push(item);
+        });
+        return SHOP_SECTIONS.filter(s => grouped[s.id]?.length).map(s => (
+          <div key={s.id}>
+            <div className="shop-section-header">{s.label}</div>
+            <div className="week-shop-pills">
+              {grouped[s.id].map(item => {
+                const isDup = dupMap.has(item.id);
+                const isChecked = shopChecked[item.id] || item.done;
+                const wasUnfiltered = unfilteredIds.has(item.id);
+                return (
+                  <span key={item.id} style={{position:"relative"}}>
+                    <span className={"shop-pill" + (isDup ? " duplicate" : "") + (isChecked ? " done" : "")}
+                      onClick={(e) => {
+                        if (isDup && !isChecked) { e.stopPropagation(); setPopoverId(popoverId === item.id ? null : item.id); }
+                        else toggleItem(item);
+                      }}>
+                      {item.text}
+                      {wasUnfiltered && !isChecked && <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }}>↩</button>}
+                      <button className="pill-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>
+                    </span>
+                    {popoverId === item.id && dupMap.get(item.id) && (
+                      <span className="dup-popover" onClick={e => e.stopPropagation()}>
+                        Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
+                        <br/><span style={{fontSize:10, color:"var(--ink4)"}}>Tap pill again to check off</span>
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-            );
-          })}
-        </div>
-      </>}
+                );
+              })}
+            </div>
+          </div>
+        ));
+      })()}
       {filteredItems.length > 0 && (
         <details className="filtered-section">
           <summary className="filtered-summary">Filtered out ({filteredItems.length})</summary>
@@ -1860,7 +1885,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
   batch, prepTasks, prepChecked, onAddItem, onRemoveItem, onMoveItem, onClearDay, onAddNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
-  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, onAdjustFreezerQty, shopFilters }) {
+  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, onAdjustFreezerQty, shopFilters, shopSectionKeywords }) {
   const [shopOpen, setShopOpen]     = useState(true);
   const [prepOpen, setPrepOpen]     = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -2215,7 +2240,7 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           regulars={regulars} regChecked={regChecked} onToggleRegChecked={onToggleRegChecked}
           shopChecked={shopChecked} onToggleShopChecked={onToggleShopChecked}
           freeShop={freeShop} onAddFreeShop={onAddFreeShop} onToggleFreeShop={onToggleFreeShop} onRemoveFreeShop={onRemoveFreeShop}
-          shopFilters={shopFilters}
+          shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords}
         />
       )}
 
@@ -2659,10 +2684,12 @@ function InventoryView({ week, recipes, staples, onAddStaple, onCycleStaple, onR
   );
 }
 
-function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCustomTag, customCategories, onAddCustomCategory, onRemoveCustomCategory, shopFilters, onAddShopFilter, onRemoveShopFilter, recipes, setRecipes }) {
+function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCustomTag, customCategories, onAddCustomCategory, onRemoveCustomCategory, shopFilters, onAddShopFilter, onRemoveShopFilter, shopSectionKeywords, onAddShopSectionKeyword, onRemoveShopSectionKeyword, recipes, setRecipes }) {
   const [newTag, setNewTag]       = useState("");
   const [newCat, setNewCat]       = useState("");
   const [newFilter, setNewFilter] = useState("");
+  const [expandedSections, setExpandedSections] = useState({});
+  const [newKeyword, setNewKeyword] = useState({});
   const [thumbMsg, setThumbMsg]   = useState(null);
   const [thumbBusy, setThumbBusy] = useState(false);
 
@@ -2803,6 +2830,43 @@ function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCust
         </div>
       </div>
 
+      <div className="pantry-section-label" style={{marginTop:24}}>Shopping Sections</div>
+      <div style={{fontSize:11, color:"var(--ink4)", fontStyle:"italic", marginBottom:6}}>Map ingredients to supermarket aisles</div>
+      <div className="inv-card" style={{marginBottom:12}}>
+        {SHOP_SECTIONS.filter(s => s.id !== 'other').map(s => {
+          const keywords = (shopSectionKeywords[s.id] || []).slice().sort();
+          const isExpanded = expandedSections[s.id];
+          const kwInput = newKeyword[s.id] || "";
+          return (
+            <div key={s.id} style={{borderBottom:"1px solid var(--border2)"}}>
+              <div className="pref-section-row" onClick={() => setExpandedSections(prev => ({...prev, [s.id]: !prev[s.id]}))}>
+                <span>{s.label} <span style={{fontSize:11, color:"var(--ink4)", fontWeight:400}}>({keywords.length})</span></span>
+                <span style={{fontSize:9, color:"var(--ink4)", transition:"transform 0.2s", display:"inline-block", transform: isExpanded ? "rotate(0deg)" : "rotate(-90deg)"}}>▼</span>
+              </div>
+              {isExpanded && (
+                <div style={{padding:"0 12px 10px"}}>
+                  <div className="pantry-pill-row" style={{marginBottom:6}}>
+                    {keywords.map(kw => (
+                      <span key={kw} className="pantry-pill" style={{fontSize:11}}>
+                        {kw}
+                        <button className="pp-remove" onClick={() => onRemoveShopSectionKeyword(s.id, kw)}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="pantry-pill-add">
+                    <input className="pantry-add-input" placeholder={`Add to ${s.label}…`} value={kwInput} style={{fontSize:11}}
+                      onChange={e => setNewKeyword(prev => ({...prev, [s.id]: e.target.value}))}
+                      onKeyDown={e => { if (e.key === "Enter" && kwInput.trim()) { onAddShopSectionKeyword(s.id, kwInput.trim()); setNewKeyword(prev => ({...prev, [s.id]: ""})); }}}/>
+                    <button className="pantry-add-btn" disabled={!kwInput.trim()} style={{fontSize:11, padding:"6px 10px"}}
+                      onClick={() => { if (kwInput.trim()) { onAddShopSectionKeyword(s.id, kwInput.trim()); setNewKeyword(prev => ({...prev, [s.id]: ""})); }}}>Add</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       <div className="pantry-section-label" style={{marginTop:24}}>Thumbnails</div>
       <div className="inv-card" style={{padding:"12px 14px", display:"flex", alignItems:"center", gap:10}}>
         <button className="btn btn-primary" style={{fontSize:12, padding:"8px 14px"}} disabled={thumbBusy} onClick={handleFetchThumbnails}>
@@ -2840,6 +2904,7 @@ export default function App() {
   const [customTags, setCustomTags]             = useState([]);
   const [customCategories, setCustomCategories] = useState([]);
   const [shopFilters, setShopFilters]           = useState([]);
+  const [shopSectionKeywords, setShopSectionKeywords] = useState(DEFAULT_SECTION_KEYWORDS);
   const [freezer, setFreezer] = useState([]);
   const [batch, setBatch]     = useState([]);
   const [prepTasks, setPrepTasks]     = useState([]);
@@ -2904,7 +2969,7 @@ export default function App() {
     const [recipesData, batchData, fridgeData, freezerData,
            staplesData, regularsData, prefsData, customTagsData, customCatsData,
            shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData,
-           shopFiltersData] = await Promise.all([
+           shopFiltersData, sectionKeywordsData] = await Promise.all([
       fetchRecipes(),
       fetchBatchPrep(),
       fetchFridge(),
@@ -2920,6 +2985,7 @@ export default function App() {
       fetchPrepTasks(),
       fetchPrepChecked(),
       fetchShopFilters(),
+      fetchShopSectionKeywords(),
     ]);
     setRecipes(recipesData.map(toAppRecipe));
     await migrateWeekPlanToItems(THIS_WEEK);
@@ -2939,6 +3005,8 @@ export default function App() {
     setPrepTasks(prepTasksData);
     setPrepChecked(prepCheckedData);
     setShopFilters(shopFiltersData);
+    // Use DB keywords if any exist, otherwise keep defaults
+    if (Object.keys(sectionKeywordsData).length > 0) setShopSectionKeywords(sectionKeywordsData);
   };
 
   const setupRealtimeSubscriptions = () => {
@@ -3299,6 +3367,24 @@ export default function App() {
     try { await dbRemoveShopFilter(name); } catch (e) { console.error(e); }
   };
 
+  const handleAddShopSectionKeyword = async (section, keyword) => {
+    const kw = keyword.toLowerCase().trim();
+    if (!kw) return;
+    setShopSectionKeywords(prev => {
+      const list = prev[section] || [];
+      if (list.includes(kw)) return prev;
+      return { ...prev, [section]: [...list, kw] };
+    });
+    try { await dbAddShopSectionKeyword(section, kw); } catch (e) { console.error(e); }
+  };
+  const handleRemoveShopSectionKeyword = async (section, keyword) => {
+    setShopSectionKeywords(prev => ({
+      ...prev,
+      [section]: (prev[section] || []).filter(k => k !== keyword),
+    }));
+    try { await dbRemoveShopSectionKeyword(section, keyword); } catch (e) { console.error(e); }
+  };
+
   // ── Shopping checked handlers ──
   const handleToggleShopChecked = async (key) => {
     const wasChecked = shopChecked[key];
@@ -3381,11 +3467,11 @@ export default function App() {
       onAddItem={handleAddItem} onRemoveItem={handleRemoveItem} onMoveItem={handleMoveItem} onClearDay={handleClearDay} onAddNote={handleAddNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
-      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop} shopFilters={shopFilters}
+      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop} shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords}
       onAdjustFreezerQty={handleAdjustFreezerQty} />,
     recipes: <RecipesView recipes={recipes} library={library} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} onPromoteRadar={handlePromoteRadar} customTags={customTags} customCategories={customCategories} />,
     pantry:  <InventoryView week={week} recipes={recipes} staples={staples} onAddStaple={handleAddStaple} onCycleStaple={handleCycleStaple} onRemoveStaple={handleRemoveStaple} regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular} fridge={fridge} onAddFridge={handleAddFridge} onCycleFridge={handleCycleFridge} onRemoveFridge={handleRemoveFridge} freezer={freezer} onAddFreezer={handleAddFreezer} onAdjustFreezerQty={handleAdjustFreezerQty} onRemoveFreezer={handleRemoveFreezer} />,
-    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} shopFilters={shopFilters} onAddShopFilter={handleAddShopFilter} onRemoveShopFilter={handleRemoveShopFilter} recipes={recipes} setRecipes={setRecipes} />,
+    prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} shopFilters={shopFilters} onAddShopFilter={handleAddShopFilter} onRemoveShopFilter={handleRemoveShopFilter} shopSectionKeywords={shopSectionKeywords} onAddShopSectionKeyword={handleAddShopSectionKeyword} onRemoveShopSectionKeyword={handleRemoveShopSectionKeyword} recipes={recipes} setRecipes={setRecipes} />,
   };
   return (
     <>
@@ -3411,7 +3497,7 @@ export default function App() {
             regChecked={regChecked} onToggleRegChecked={handleToggleRegChecked}
             shopChecked={shopChecked} onToggleShopChecked={handleToggleShopChecked}
             freeShop={freeShop} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop}
-            shopFilters={shopFilters}
+            shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords}
           />
         )}
         <nav className="tabs">

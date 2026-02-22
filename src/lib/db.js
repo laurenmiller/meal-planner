@@ -581,6 +581,38 @@ export async function removeShopFilter(name) {
   if (error) console.error('removeShopFilter', error)
 }
 
+// ── Shop Section Keywords ────────────────────────────────────────────────────
+
+export async function fetchShopSectionKeywords() {
+  const { data, error } = await supabase
+    .from('shop_section_keywords')
+    .select('section, keyword')
+    .order('keyword')
+  if (error) { console.error('fetchShopSectionKeywords', error); return {} }
+  const map = {}
+  data.forEach(r => {
+    if (!map[r.section]) map[r.section] = []
+    map[r.section].push(r.keyword)
+  })
+  return map
+}
+
+export async function addShopSectionKeyword(section, keyword) {
+  const { error } = await supabase
+    .from('shop_section_keywords')
+    .insert({ section, keyword: keyword.toLowerCase().trim() })
+  if (error) console.error('addShopSectionKeyword', error)
+}
+
+export async function removeShopSectionKeyword(section, keyword) {
+  const { error } = await supabase
+    .from('shop_section_keywords')
+    .delete()
+    .eq('section', section)
+    .eq('keyword', keyword)
+  if (error) console.error('removeShopSectionKeyword', error)
+}
+
 // ── Shop Checked (per-week ingredient check state) ───────────────────────────
 
 export async function fetchShopChecked() {
