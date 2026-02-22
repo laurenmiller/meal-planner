@@ -1390,28 +1390,34 @@ function ItemCard({ item, isToday, isPrimary, readyBy, onDetail, onRemove, isDra
 // Pick from recipe library or add a brand-new recipe.
 // Saves to Sunday Batch Prep (with yield + note fields).
 
-function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], customCategories = [] }) {
+function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = [], customCategories = [] }) {
   const [mode, setMode] = useState("pick");
   const [search, setSearch] = useState("");
   const [noteText, setNoteText] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [newUrl, setNewUrl] = useState("");
-  const [newTime, setNewTime] = useState("30");
-  const [newIngredients, setNewIngr] = useState([]);
-  const [newIngrInput, setNewIngrInput] = useState("");
   const [newSource, setNewSource] = useState("");
-  const [newCategory, setNewCategory] = useState("dinner");
-  const [newTags, setNewTags] = useState([]);
-  const [newPrepNote, setNewPrepNote] = useState("");
   const [newThumbnailUrl, setNewThumbnailUrl] = useState(null);
   const [newDescription, setNewDescription] = useState(null);
   const [newServings, setNewServings] = useState(null);
+  const [newTime, setNewTime] = useState("30");
+  const [newIngredients, setNewIngr] = useState([]);
   const [newInstructions, setNewInstructions] = useState([]);
   const [newRawIngredients, setNewRawIngredients] = useState([]);
-  const [saveToLibrary, setSaveToLibrary] = useState(false);
+  const [fetchLoading, setFetchLoading] = useState(false);
+  const [scraped, setScraped] = useState(false);
+  const urlDebounceRef = useRef(null);
+  const lastFetchedUrlRef = useRef("");
 
-  const filtered = recipes.filter(r =>
-    search === "" || r.title.toLowerCase().includes(search.toLowerCase())
+  const isBatchCat = (cat) => cat === "breakfast" || cat === "sweets";
+
+  const batchRecipes = recipes.filter(r =>
+    isBatchCat(r.category) &&
+    (search === "" || r.title.toLowerCase().includes(search.toLowerCase()))
+  );
+  const batchRadar = (radar || []).filter(r =>
+    isBatchCat(r.category) &&
+    (search === "" || r.title.toLowerCase().includes(search.toLowerCase()))
   );
 
   const handlePick = (r) => {
@@ -1425,7 +1431,7 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
       title: noteText.trim(),
       source: "Added manually",
       url: null,
-      category: "dinner",
+      category: "breakfast",
       tags: [],
       time: 0,
       ingredients: [],
@@ -1436,26 +1442,56 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
     onClose();
   };
 
+  const doUrlScrape = async (urlVal) => {
+    const trimmed = urlVal.trim();
+    if (!trimmed || trimmed === lastFetchedUrlRef.current) return;
+    lastFetchedUrlRef.current = trimmed;
+    setFetchLoading(true);
+    setScraped(false);
+    const { thumbnailUrl: t, scrapedData } = await fetchRecipeData(trimmed);
+    if (t) setNewThumbnailUrl(t);
+    if (scrapedData) {
+      if (!newTitle.trim() && scrapedData.title) setNewTitle(scrapedData.title);
+      if (newTime === "30" && scrapedData.cookTime) setNewTime(String(scrapedData.cookTime));
+      if (!newIngredients.length && scrapedData.ingredients) setNewIngr(scrapedData.ingredients);
+      if (scrapedData.description) setNewDescription(scrapedData.description);
+      if (scrapedData.servings) setNewServings(scrapedData.servings);
+      if (scrapedData.instructions) setNewInstructions(scrapedData.instructions);
+      if (scrapedData.ingredients) setNewRawIngredients(scrapedData.ingredients);
+      setScraped(true);
+    }
+    try { if (!newSource.trim()) setNewSource(new URL(trimmed).hostname.replace(/^www\./, '')); } catch {}
+    setFetchLoading(false);
+  };
+  const handleNewUrlBlur = () => {
+    if (urlDebounceRef.current) { clearTimeout(urlDebounceRef.current); urlDebounceRef.current = null; }
+    doUrlScrape(newUrl);
+  };
+  const handleNewUrlChange = (val) => {
+    setNewUrl(val);
+    if (urlDebounceRef.current) clearTimeout(urlDebounceRef.current);
+    urlDebounceRef.current = setTimeout(() => doUrlScrape(val), 800);
+  };
+
   const handleAddNew = () => {
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() && !newUrl.trim()) return;
+    const fallbackTitle = newTitle.trim() || (() => { try { return new URL(newUrl.trim()).hostname.replace(/^www\./, ''); } catch { return newUrl.trim(); } })();
     const recipe = {
-      title: newTitle.trim(),
-      source: saveToLibrary ? (newSource.trim() || "Added manually") : "Added manually",
+      title: fallbackTitle,
+      source: newSource.trim() || "Added manually",
       url: newUrl.trim() || null,
-      category: saveToLibrary ? (newCategory || "dinner") : "dinner",
-      tags: saveToLibrary ? newTags : [],
+      category: "breakfast",
+      tags: [],
       time: parseInt(newTime) || 30,
       ingredients: newIngredients,
-      prepNote: newPrepNote.trim() || undefined,
       thumbnailUrl: newThumbnailUrl,
       description: newDescription || null,
       instructions: newInstructions,
       servings: newServings || null,
       rawIngredients: newRawIngredients,
-      inLibrary: saveToLibrary,
+      inLibrary: false,
       _needsInsert: true,
     };
-    if (saveToLibrary) onAddRecipe(recipe);
     onAdd(recipe);
     onClose();
   };
@@ -1466,38 +1502,73 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
         <div className="sheet-handle"/>
         <div className="sheet-header">
           <div className="sheet-title">Weekend <em>Batch</em> Prep</div>
-          <div className="sheet-subtitle">Add a recipe to make ahead this weekend</div>
         </div>
 
         <div className="sheet-mode-toggle">
           <button className={"sheet-mode-btn" + (mode==="pick" ? " active" : "")} onClick={() => setMode("pick")}>
-            From library
+            Recipes
+          </button>
+          <button className={"sheet-mode-btn" + (mode==="url" ? " active" : "")} onClick={() => setMode("url")}>
+            Add from web
           </button>
           <button className={"sheet-mode-btn" + (mode==="note" ? " active" : "")} onClick={() => setMode("note")}>
-            Add note
-          </button>
-          <button className={"sheet-mode-btn" + (mode==="new" ? " active" : "")} onClick={() => setMode("new")}>
-            New recipe
+            Note
           </button>
         </div>
 
         <div className="sheet-body">
           {mode === "pick" && (<>
-            <input className="pick-search" placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} autoFocus/>
-            {filtered.map(r => (
+            <input
+              className="pick-search"
+              placeholder="Search breakfast & sweets recipes…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+            />
+
+            {batchRadar.map(item => (
+              <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => handlePick(item)}>
+                <div className="pick-thumb pick-thumb-radar">✦</div>
+                <div style={{flex:1, minWidth:0}}>
+                  <div className="pick-recipe-title">{item.title}</div>
+                  <div className="pick-recipe-meta"><span className="pick-badge-radar">try soon</span>{item.source ? ` · ${item.source}` : ""}</div>
+                </div>
+                <span style={{color:"var(--ink4)", fontSize:18}}>›</span>
+              </div>
+            ))}
+
+            {batchRecipes.map(r => (
               <div key={r.id} className="pick-recipe-item" onClick={() => handlePick(r)}>
                 <div className="pick-thumb">{r.title[0]}</div>
                 <div style={{flex:1, minWidth:0}}>
                   <div className="pick-recipe-title">{r.title}</div>
                   <div className="pick-recipe-meta">{r.source} · {r.time} min</div>
-                  <div className="pick-tags"><Tags tags={r.tags}/></div>
                 </div>
-                <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
+                <span style={{color:"var(--ink4)", fontSize:18}}>›</span>
               </div>
             ))}
-            {filtered.length === 0 && (
-              <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic"}}>
-                No recipes match "{search}"
+
+            {batchRecipes.length === 0 && batchRadar.length === 0 && search.trim() && (
+              <div style={{padding:"16px 0", textAlign:"center"}}>
+                <div style={{color:"var(--ink4)", fontSize:12, fontStyle:"italic", marginBottom:8}}>No breakfast or sweets recipes match "{search}"</div>
+                <button className="sheet-btn sheet-btn-primary" style={{fontSize:11, padding:"6px 14px"}}
+                  onClick={() => {
+                    const recipe = {
+                      title: search.trim(), source: "Added manually", url: null,
+                      category: "breakfast", tags: [], time: 0, ingredients: [],
+                      inLibrary: false, _needsInsert: true,
+                    };
+                    onAdd(recipe);
+                    onClose();
+                  }}>
+                  Save "{search.trim()}" as a note
+                </button>
+              </div>
+            )}
+
+            {batchRecipes.length === 0 && batchRadar.length === 0 && !search.trim() && (
+              <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:12, fontStyle:"italic"}}>
+                No breakfast or sweets recipes yet
               </div>
             )}
           </>)}
@@ -1508,7 +1579,7 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
                 <label className="form-label">What's the plan?</label>
                 <input
                   className="form-input"
-                  placeholder="e.g. chicken stock, granola bars"
+                  placeholder="e.g. granola bars, banana bread"
                   value={noteText}
                   autoFocus
                   onChange={e => setNoteText(e.target.value)}
@@ -1520,119 +1591,37 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
             </div>
           )}
 
-          {mode === "new" && (
-            <div style={{paddingBottom:8}}>
-              <div className="form-field">
-                <label className="form-label">Recipe name</label>
-                <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}/>
+          {mode === "url" && (
+            <div style={{padding:"8px 0", display:"flex", flexDirection:"column", gap:6}}>
+              <div style={{display:"flex", gap:6, alignItems:"center", flexWrap:"wrap"}}>
+                <input className="form-input" placeholder="Recipe name" value={newTitle} autoFocus style={{flex:"2 1 140px"}}
+                  onChange={e => setNewTitle(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleAddNew()}/>
+                <input className="form-input" placeholder="URL (optional)" value={newUrl} style={{flex:"3 1 180px"}}
+                  onChange={e => handleNewUrlChange(e.target.value)}
+                  onBlur={handleNewUrlBlur}
+                  onKeyDown={e => e.key === "Enter" && handleAddNew()}/>
               </div>
-              <div className="form-field">
-                <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <div style={{display:"flex", alignItems:"center", gap:8}}>
-                  <input className="form-input" style={{flex:1}} placeholder="https://…" value={newUrl}
-                    onChange={e => setNewUrl(e.target.value)}
-                    onBlur={async () => {
-                      if (!newUrl.trim()) return;
-                      const { thumbnailUrl: t, scrapedData } = await fetchRecipeData(newUrl.trim());
-                      if (t) setNewThumbnailUrl(t);
-                      if (scrapedData) {
-                        if (!newTitle.trim() && scrapedData.title) setNewTitle(scrapedData.title);
-                        if (newTime === "30" && scrapedData.cookTime) setNewTime(String(scrapedData.cookTime));
-                        if (!newIngredients.length && scrapedData.ingredients) setNewIngr(scrapedData.ingredients);
-                        if (scrapedData.description) setNewDescription(scrapedData.description);
-                        if (scrapedData.servings) setNewServings(scrapedData.servings);
-                        if (scrapedData.instructions) setNewInstructions(scrapedData.instructions);
-                        if (scrapedData.ingredients) setNewRawIngredients(scrapedData.ingredients);
-                      }
-                    }}/>
-                  {newThumbnailUrl && <img src={newThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
-                </div>
-              </div>
-              <div className="form-field">
-                <label className="form-label">Cook time (min)</label>
-                <input className="form-input" type="number" value={newTime}
-                  onChange={e => setNewTime(e.target.value)}/>
-              </div>
-              <div className="form-field">
-                <label className="form-label">Key ingredients <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <div className="ingredient-tags" onClick={e => e.currentTarget.querySelector("input")?.focus()}>
-                  {newIngredients.map((ing, i) => (
-                    <span key={i} className="ingredient-tag">
-                      <span style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); setNewIngrInput(ing); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>{ing}</span>
-                      <button className="ingredient-tag-remove" onClick={e => { e.stopPropagation(); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>×</button>
-                    </span>
-                  ))}
-                  <input className="ingredient-tag-input"
-                    placeholder={newIngredients.length === 0 ? "e.g. salmon fillet…" : "add more…"}
-                    value={newIngrInput}
-                    onChange={e => setNewIngrInput(e.target.value)}
-                    onKeyDown={e => {
-                      const v = newIngrInput.trim().toLowerCase();
-                      if ((e.key === "Enter" || e.key === ",") && v) {
-                        e.preventDefault();
-                        if (!newIngredients.includes(v)) setNewIngr(ii => [...ii, v]);
-                        setNewIngrInput("");
-                      } else if (e.key === "Backspace" && !newIngrInput && newIngredients.length > 0) {
-                        setNewIngr(ii => ii.slice(0,-1));
-                      }
-                    }}
-                    onBlur={() => { const v = newIngrInput.trim().toLowerCase(); if (v && !newIngredients.includes(v)) { setNewIngr(ii => [...ii, v]); setNewIngrInput(""); }}}
-                  />
-                </div>
-                <div className="ingredient-tag-hint">Enter or comma to add</div>
-              </div>
-              <div className="form-field">
-                <label className="form-label">Prep note <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <input className="form-input" placeholder="e.g. Marinate overnight" value={newPrepNote}
-                  onChange={e => setNewPrepNote(e.target.value)}/>
-              </div>
-              <div style={{marginTop:12, borderTop:"1px solid var(--border2)", paddingTop:12}}>
-                <label style={{display:"flex", alignItems:"center", gap:8, fontSize:12, color:"var(--ink3)", cursor:"pointer", marginBottom: saveToLibrary ? 12 : 0}}>
-                  <input type="checkbox" checked={saveToLibrary} onChange={e => setSaveToLibrary(e.target.checked)}
-                    style={{accentColor:"var(--accent)"}}/>
-                  <span>Save to recipe library</span>
-                </label>
-                {saveToLibrary && (
-                  <div>
-                    <div className="form-field">
-                      <label className="form-label">Source</label>
-                      <input className="form-input" placeholder="e.g. NYT Cooking, Smitten Kitchen" value={newSource}
-                        onChange={e => setNewSource(e.target.value)}/>
-                    </div>
-                    <div className="form-field">
-                      <label className="form-label">Category</label>
-                      <div className="cat-select">
-                        {[["dinner","Dinner"],["breakfast","Breakfast & Snacks"],["sweets","Sweets"],...customCategories.map(c=>[c,c])].map(([k,l]) => (
-                          <button key={k} type="button"
-                            className={"cat-btn" + (newCategory === k ? " active" : "")}
-                            onClick={() => setNewCategory(k)}>
-                            {l}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="form-field">
-                      <label className="form-label">Tags</label>
-                      <div className="tag-toggle-row">
-                        {["fish","vegetarian",...customTags].map(t => (
-                          <button key={t} className={"tag-toggle" + (newTags.includes(t) ? " on" : "")}
-                            onClick={() => setNewTags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t])}>
-                            {t === "fish" ? "🐟 Fish" : t === "vegetarian" ? "🌿 Veg" : t}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {fetchLoading && <span style={{fontSize:11, color:"var(--ink4)"}}>fetching…</span>}
+              {scraped && <div style={{fontSize:10, color:"var(--sage)", fontStyle:"italic"}}>Fetched from page</div>}
             </div>
           )}
         </div>
+
         <div className="sheet-footer">
-          {mode === "note" && <button className="sheet-btn sheet-btn-primary" disabled={!noteText.trim()} onClick={handleAddNote}>Add</button>}
-          {mode === "new" && <button className="sheet-btn sheet-btn-primary" disabled={!newTitle.trim()} onClick={handleAddNew}>Add</button>}
-          <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>Cancel</button>
+          {mode === "note" && (
+            <button className="sheet-btn sheet-btn-primary" disabled={!noteText.trim()} onClick={handleAddNote}>
+              Save note
+            </button>
+          )}
+          {mode === "url" && (
+            <button className="sheet-btn sheet-btn-primary" disabled={(!newTitle.trim() && !newUrl.trim()) || fetchLoading} onClick={handleAddNew}>
+              Add to batch prep
+            </button>
+          )}
+          <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>
+            {mode === "note" || mode === "url" ? "Back" : "Cancel"}
+          </button>
         </div>
       </div>
     </div>
@@ -2253,6 +2242,7 @@ function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, custo
       {sheet !== null && sheet.mode === 'batch' && (
         <BatchSheet
           recipes={recipes}
+          radar={radar}
           onClose={closeSheet}
           onAdd={handleAddBatch}
           onAddRecipe={onAddRecipe}
