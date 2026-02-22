@@ -260,6 +260,15 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .radar-row-remove { font-size: 13px; color: var(--ink4); background: none; border: none; cursor: pointer; padding: 2px 4px; flex-shrink: 0; opacity: 0; transition: opacity 0.12s; line-height: 1; }
 .radar-row:hover .radar-row-remove { opacity: 1; }
 .radar-row-remove:hover { color: #c0392b; }
+/* ── Radar interleaved in library ── */
+.radar-interleave { display: flex; flex-direction: column; margin-top: 4px; }
+.radar-interleave-row { display: flex; align-items: center; gap: 8px; padding: 7px 2px; border-bottom: 1px solid var(--border2); cursor: pointer; transition: background 0.1s; }
+.radar-interleave-row:last-child { border-bottom: none; }
+.radar-interleave-row:hover { background: var(--surface2); }
+.radar-interleave-icon { font-size: 12px; color: var(--sage); flex-shrink: 0; }
+.radar-interleave-title { flex: 1; min-width: 0; font-size: 12px; color: var(--sage); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radar-interleave-source { font-size: 11px; color: var(--ink4); font-style: italic; flex-shrink: 0; white-space: nowrap; }
+
 /* ── Radar detail sheet ── */
 .radar-sheet-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 

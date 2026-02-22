@@ -2470,38 +2470,58 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
           ...customCategories.map(c => ({ key: c, label: c })),
           { key: "",          label: "Uncategorized" },
         ];
+        const builtinCats = ["dinner","breakfast","sweets"];
+        const allCatKeys = [...builtinCats, ...customCategories];
         return SECTIONS.map(({ key, label }) => {
           const sectionKey = key || "uncat";
           const sectionRecipes = filtered.filter(r =>
-            key === "" ? (!r.category || !["dinner","breakfast","sweets"].includes(r.category)) : r.category === key
+            key === "" ? (!r.category || !allCatKeys.includes(r.category)) : r.category === key
           );
-          if (!sectionRecipes.length) return null;
+          const sectionRadar = radar.filter(r => {
+            const cat = r.category || "dinner";
+            return key === "" ? !allCatKeys.includes(cat) : cat === key;
+          });
+          if (!sectionRecipes.length && !sectionRadar.length) return null;
+          const totalCount = sectionRecipes.length + sectionRadar.length;
           const collapsed = collapsedSections[sectionKey];
           return (
             <div key={sectionKey}>
               <div className="recipe-section-label" onClick={() => toggleSection(sectionKey)}>
                 <span style={{display:"flex", alignItems:"center", gap:8}}>
                   {label}
-                  {!collapsed && <span className="recipe-section-count">{sectionRecipes.length}</span>}
+                  {!collapsed && <span className="recipe-section-count">{totalCount}</span>}
                 </span>
                 <span style={{fontSize:9, color:"var(--ink4)", transition:"transform 0.2s", display:"inline-block", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)"}}>▼</span>
               </div>
-              {!collapsed && (
-                <div className="rlist">
-                  {sectionRecipes.map(r => (
-                    <div key={r.id} className="rcard" onClick={() => setDetail(r)}>
-                      {r.thumbnailUrl
-                        ? <img className="rcard-thumb" src={r.thumbnailUrl} alt="" />
-                        : <div className="rcard-placeholder">🍽</div>}
-                      <div className="rcard-body">
-                        <div className="rl-title">{r.title}</div>
-                        <div className="rl-meta">{r.source} · {r.time} min</div>
-                        {r.tags?.length > 0 && <div className="rl-tags"><Tags tags={r.tags}/></div>}
+              {!collapsed && (<>
+                {sectionRecipes.length > 0 && (
+                  <div className="rlist">
+                    {sectionRecipes.map(r => (
+                      <div key={r.id} className="rcard" onClick={() => setDetail(r)}>
+                        {r.thumbnailUrl
+                          ? <img className="rcard-thumb" src={r.thumbnailUrl} alt="" />
+                          : <div className="rcard-placeholder">🍽</div>}
+                        <div className="rcard-body">
+                          <div className="rl-title">{r.title}</div>
+                          <div className="rl-meta">{r.source} · {r.time} min</div>
+                          {r.tags?.length > 0 && <div className="rl-tags"><Tags tags={r.tags}/></div>}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+                {sectionRadar.length > 0 && (
+                  <div className="radar-interleave">
+                    {sectionRadar.map(item => (
+                      <div key={item.id} className="radar-interleave-row" onClick={() => setRadarDetail(item)}>
+                        <span className="radar-interleave-icon">→</span>
+                        <span className="radar-interleave-title">{item.title}</span>
+                        {item.source && <span className="radar-interleave-source">{item.source}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>)}
             </div>
           );
         });
