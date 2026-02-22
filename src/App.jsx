@@ -16,7 +16,7 @@ import {
   fetchShopFilters, addShopFilter as dbAddShopFilter, removeShopFilter as dbRemoveShopFilter,
   fetchShopChecked, toggleShopChecked as dbToggleShopChecked,
   fetchRegChecked, toggleRegChecked as dbToggleRegChecked,
-  fetchFreeShop, addFreeShopItem as dbAddFreeShopItem, updateFreeShopItem as dbUpdateFreeShopItem,
+  fetchFreeShop, addFreeShopItem as dbAddFreeShopItem, updateFreeShopItem as dbUpdateFreeShopItem, removeFreeShopItem as dbRemoveFreeShopItem,
   fetchPrepTasks, addPrepTask as dbAddPrepTask, updatePrepTask as dbUpdatePrepTask,
   fetchPrepChecked, togglePrepChecked as dbTogglePrepChecked,
   fetchRecipeData, uploadRecipeFile, removeRecipeFile,
@@ -682,11 +682,12 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
 // ── Shopping Sheet ────────────────────────────────────────────────────────────
 
 function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAddRegular, onRemoveRegular,
-  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, shopFilters }) {
+  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters }) {
 
   const [freeInput, setFreeInput] = useState("");
   const [regularInput, setRegularInput] = useState("");
   const [unfilteredIds, setUnfilteredIds] = useState(new Set());
+  const [dismissedIds, setDismissedIds] = useState(new Set());
   const [popoverId, setPopoverId] = useState(null);
 
   const toggleReg  = id => onToggleRegChecked(id);
@@ -700,6 +701,10 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
   const toggleFreeShop = id => onToggleFreeShop(id);
   const addFreeItem   = () => {
     if (freeInput.trim()) { onAddFreeShop(freeInput.trim()); setFreeInput(""); }
+  };
+  const removeItem = (item) => {
+    if (item.done !== undefined) onRemoveFreeShop(item.id);
+    else setDismissedIds(prev => new Set([...prev, item.id]));
   };
 
   // Derive recipe items — suppress if covered by stocked staple or freezer item
@@ -727,7 +732,8 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
     if (seen[item.text]) { seen[item.text].source += ", " + item.source; seen[item.text].recipeName += ", " + item.recipeName; }
     else { seen[item.text] = { ...item }; deduped.push(seen[item.text]); }
   });
-  const allDeduped = [...stapleShopItems, ...deduped, ...freeShop.map(f => ({ ...f, source: null }))];
+  const allDeduped = [...stapleShopItems, ...deduped, ...freeShop.map(f => ({ ...f, source: null }))]
+    .filter(item => !dismissedIds.has(item.id));
 
   // Split staple-filtered vs main — only stocked staple names filter, not restock ones
   const stockedStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
@@ -768,6 +774,7 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
         {wasUnfiltered && !checked && (
           <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }} title="Move back to filtered">↩</button>
         )}
+        <button className="shop-item-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>
         {popoverId === item.id && dupMap.get(item.id) && (
           <span className="dup-popover" onClick={e => e.stopPropagation()}>
             Also needed: {dupMap.get(item.id).map(d => d.text + " \u00b7 " + d.recipeName).join("; ")}
@@ -1725,9 +1732,10 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
 }
 
 // ── Inline Shopping List (week tab) ──────────────────────────────────────────
-function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, shopFilters }) {
+function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters }) {
   const [freeInput, setFreeInput] = useState("");
   const [unfilteredIds, setUnfilteredIds] = useState(new Set());
+  const [dismissedIds, setDismissedIds] = useState(new Set());
   const [popoverId, setPopoverId] = useState(null);
 
   const okStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
@@ -1749,7 +1757,8 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
     if (seen[item.text]) { seen[item.text].source += ", " + item.source; seen[item.text].recipeName += ", " + item.recipeName; }
     else { seen[item.text] = { ...item }; deduped.push(seen[item.text]); }
   });
-  const allDeduped = [...stapleShopItems, ...deduped, ...freeShop];
+  const allDeduped = [...stapleShopItems, ...deduped, ...freeShop]
+    .filter(item => !dismissedIds.has(item.id));
 
   // Split staple-filtered vs main — only stocked staple names filter, not restock ones
   const stockedStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
@@ -1764,6 +1773,10 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   const toggleItem = (item) => {
     if (item.done !== undefined) onToggleFreeShop(item.id);
     else onToggleShopChecked(item.id);
+  };
+  const removeItem = (item) => {
+    if (item.done !== undefined) onRemoveFreeShop(item.id);
+    else setDismissedIds(prev => new Set([...prev, item.id]));
   };
 
   const unfilterItem = (item) => {
@@ -1802,6 +1815,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
                   }}>
                   {item.text}
                   {wasUnfiltered && !isChecked && <button className="pill-refilter" onClick={e => { e.stopPropagation(); refilterItem(item); }}>↩</button>}
+                  <button className="pill-remove" onClick={e => { e.stopPropagation(); removeItem(item); }}>×</button>
                 </span>
                 {popoverId === item.id && dupMap.get(item.id) && (
                   <span className="dup-popover" onClick={e => e.stopPropagation()}>
@@ -1846,7 +1860,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
   batch, prepTasks, prepChecked, onAddItem, onRemoveItem, onMoveItem, onClearDay, onAddNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
-  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty, shopFilters }) {
+  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, onAdjustFreezerQty, shopFilters }) {
   const [shopOpen, setShopOpen]     = useState(true);
   const [prepOpen, setPrepOpen]     = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -1930,6 +1944,8 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
   const handleAddBatch = (recipe) => { onAddBatch(recipe); };
 
   // Compute today index (0=Mon..6=Sun) and date numbers for each day
+  // Display order: Sunday first
+  const DISPLAY_ORDER = [6, 0, 1, 2, 3, 4, 5];
   const mondayDate = new Date(THIS_WEEK + 'T00:00:00');
   const todayStr = new Date().toISOString().slice(0, 10);
   const dayDates = DAY_NAMES.map((_, i) => {
@@ -2027,7 +2043,9 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
 
       <div className="week-scroll-wrapper">
         <div className="week-scroll">
-          {week.map((d, i) => {
+          {DISPLAY_ORDER.map(i => {
+            const d = week[i];
+            if (!d) return null;
             const isToday = i === todayIndex;
             return (
               <div key={i} className={"day-col" + (dropTarget === i ? " drop-target" : "")}
@@ -2178,7 +2196,7 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           week={week} staples={staples} freezer={freezer} fridge={fridge}
           regulars={regulars} regChecked={regChecked} onToggleRegChecked={onToggleRegChecked}
           shopChecked={shopChecked} onToggleShopChecked={onToggleShopChecked}
-          freeShop={freeShop} onAddFreeShop={onAddFreeShop} onToggleFreeShop={onToggleFreeShop}
+          freeShop={freeShop} onAddFreeShop={onAddFreeShop} onToggleFreeShop={onToggleFreeShop} onRemoveFreeShop={onRemoveFreeShop}
           shopFilters={shopFilters}
         />
       )}
@@ -3254,6 +3272,10 @@ export default function App() {
     setFreeShop(f => f.map(i => { if (i.id === id) { newDone = !i.done; return {...i, done: newDone}; } return i; }));
     try { await dbUpdateFreeShopItem(id, { done: newDone }); } catch (e) { console.error(e); }
   };
+  const handleRemoveFreeShop = async (id) => {
+    setFreeShop(f => f.filter(i => i.id !== id));
+    try { await dbRemoveFreeShopItem(id); } catch (e) { console.error(e); }
+  };
 
   // ── Prep tasks handlers ──
   const handleAddPrepTask = async (task) => {
@@ -3304,7 +3326,7 @@ export default function App() {
       onAddItem={handleAddItem} onRemoveItem={handleRemoveItem} onMoveItem={handleMoveItem} onClearDay={handleClearDay} onAddNote={handleAddNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
-      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} shopFilters={shopFilters}
+      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop} shopFilters={shopFilters}
       onAdjustFreezerQty={handleAdjustFreezerQty} />,
     recipes: <RecipesView recipes={recipes} library={library} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} onPromoteRadar={handlePromoteRadar} customTags={customTags} customCategories={customCategories} />,
     pantry:  <InventoryView week={week} recipes={recipes} staples={staples} onAddStaple={handleAddStaple} onCycleStaple={handleCycleStaple} onRemoveStaple={handleRemoveStaple} regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular} fridge={fridge} onAddFridge={handleAddFridge} onCycleFridge={handleCycleFridge} onRemoveFridge={handleRemoveFridge} freezer={freezer} onAddFreezer={handleAddFreezer} onAdjustFreezerQty={handleAdjustFreezerQty} onRemoveFreezer={handleRemoveFreezer} />,
@@ -3333,7 +3355,7 @@ export default function App() {
             regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular}
             regChecked={regChecked} onToggleRegChecked={handleToggleRegChecked}
             shopChecked={shopChecked} onToggleShopChecked={handleToggleShopChecked}
-            freeShop={freeShop} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop}
+            freeShop={freeShop} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop}
             shopFilters={shopFilters}
           />
         )}

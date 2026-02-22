@@ -212,6 +212,14 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .shop-pill.filtered { opacity: 0.45; font-style: italic; }
 .pill-refilter { background: none; border: none; padding: 0 0 0 4px; margin: 0; font-size: 11px; color: var(--ink4); cursor: pointer; opacity: 0.6; line-height: 1; }
 .pill-refilter:hover { opacity: 1; }
+.pill-remove { background: none; border: none; padding: 0 0 0 4px; margin: 0; font-size: 13px; color: var(--ink4); cursor: pointer; opacity: 0; line-height: 1; transition: opacity 0.12s; }
+.shop-pill:hover .pill-remove { opacity: 0.6; }
+.pill-remove:hover { opacity: 1; color: #c0392b; }
+@media (hover: none) { .pill-remove { opacity: 0.4; } }
+.shop-item-remove { background: none; border: none; cursor: pointer; color: var(--ink4); font-size: 15px; line-height: 1; padding: 0 0 0 4px; flex-shrink: 0; opacity: 0; transition: opacity 0.12s; }
+.shop-col-item:hover .shop-item-remove { opacity: 1; }
+.shop-item-remove:hover { color: #c0392b; }
+@media (hover: none) { .shop-item-remove { opacity: 0.4; } }
 .filtered-section { margin-top: 6px; }
 .filtered-summary { font-size: 11px; color: var(--ink4); cursor: pointer; user-select: none; }
 .filtered-note { font-size: 10px; color: var(--ink4); font-style: italic; margin: 4px 0 6px; }
