@@ -31,6 +31,10 @@ export function toAppRecipe(row) {
     pdfUrl:      row.pdf_url || undefined,
     ingredients: row.ingredients || [],
     thumbnailUrl: row.thumbnail_url || null,
+    description:  row.description || null,
+    instructions:   row.instructions || [],
+    servings:       row.servings || null,
+    rawIngredients: row.raw_ingredients || [],
   }
 }
 
@@ -47,6 +51,10 @@ function toDbRecipe(recipe) {
     pdf_url:     recipe.pdfUrl || null,
     ingredients: recipe.ingredients || [],
     thumbnail_url: recipe.thumbnailUrl || null,
+    description:  recipe.description || null,
+    instructions:    recipe.instructions || [],
+    servings:        recipe.servings || null,
+    raw_ingredients: recipe.rawIngredients || [],
   }
 }
 
@@ -585,17 +593,40 @@ export async function togglePrepChecked(week, key, checked) {
   }
 }
 
-// ── Thumbnail fetch ──────────────────────────────────────────────────────────
+// ── Recipe file upload ───────────────────────────────────────────────────────
 
-export async function fetchThumbnail(url) {
+export async function uploadRecipeFile(recipeId, file) {
+  const ext = file.name.split('.').pop()
+  const path = `${recipeId}.${ext}`
+  const { error: uploadError } = await supabase.storage
+    .from('recipe-files')
+    .upload(path, file, { upsert: true })
+  if (uploadError) { console.error('uploadRecipeFile', uploadError); throw uploadError }
+  const { data } = supabase.storage.from('recipe-files').getPublicUrl(path)
+  return data.publicUrl
+}
+
+export async function removeRecipeFile(recipeId, fileUrl) {
+  // Extract path from URL
+  const path = fileUrl.split('/recipe-files/')[1]
+  if (path) {
+    const { error } = await supabase.storage.from('recipe-files').remove([path])
+    if (error) console.error('removeRecipeFile', error)
+  }
+}
+
+// ── Recipe data fetch (thumbnail + JSON-LD scraping) ─────────────────────────
+
+export async function fetchRecipeData(url) {
   try {
     const { data, error } = await supabase.functions.invoke('fetch-thumbnail', {
       body: { url },
     })
-    if (error) { console.error('fetchThumbnail', error); return null }
-    return data?.thumbnailUrl || null
+    if (error) { console.error('fetchRecipeData error:', error); return { thumbnailUrl: null, scrapedData: null } }
+    console.log('fetchRecipeData raw:', typeof data, data)
+    return { thumbnailUrl: data?.thumbnailUrl || null, scrapedData: data?.scrapedData || null }
   } catch (e) {
-    console.error('fetchThumbnail', e)
-    return null
+    console.error('fetchRecipeData', e)
+    return { thumbnailUrl: null, scrapedData: null }
   }
 }

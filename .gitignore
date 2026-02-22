@@ -1,5 +1,8 @@
 node_modules/
 dist/
 .env
+.env.development
+.env.production
+.env
 .env.local
 .DS_Store

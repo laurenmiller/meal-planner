@@ -18,7 +18,7 @@ import {
   fetchFreeShop, addFreeShopItem as dbAddFreeShopItem, updateFreeShopItem as dbUpdateFreeShopItem,
   fetchPrepTasks, addPrepTask as dbAddPrepTask, updatePrepTask as dbUpdatePrepTask,
   fetchPrepChecked, togglePrepChecked as dbTogglePrepChecked,
-  fetchThumbnail,
+  fetchRecipeData, uploadRecipeFile, removeRecipeFile,
   THIS_WEEK,
 } from './lib/db.js';
 
@@ -113,6 +113,9 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
   const [eIngr,   setEIngr]   = useState(recipe.ingredients || []);
   const [eIngrInput, setEIngrInput] = useState("");
   const [eThumbnailUrl, setEThumbnailUrl] = useState(recipe.thumbnailUrl || null);
+  const [eDescription, setEDescription] = useState(recipe.description || null);
+  const [eServings, setEServings] = useState(recipe.servings || null);
+  const [eUploading, setEUploading] = useState(false);
 
   const toggleETag = t => setETags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t]);
   const addEIngr = val => {
@@ -136,6 +139,10 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
       tags:       eTags,
       ingredients: eIngr,
       thumbnailUrl: eThumbnailUrl,
+      description: eDescription || null,
+      instructions: recipe.instructions || [],
+      servings: eServings || null,
+      rawIngredients: recipe.rawIngredients || [],
     });
     setEditing(false);
     onClose();
@@ -154,6 +161,8 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
     setEIngr([...(recipe.ingredients || [])]);
     setEIngrInput("");
     setEThumbnailUrl(recipe.thumbnailUrl || null);
+    setEDescription(recipe.description || null);
+    setEServings(recipe.servings || null);
     setEditing(true);
   };
 
@@ -172,7 +181,7 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
 
               {recipe.tags.includes("fish")       && <div className="detail-meta-chip" style={{color:"#2a6a8a",background:"#eaf4fb",borderColor:"#a8cfe0"}}>🐟 Fish</div>}
               {recipe.tags.includes("vegetarian") && <div className="detail-meta-chip" style={{color:"#4a7a46",background:"#f0f8ee",borderColor:"#b8d4b6"}}>🌿 Veg</div>}
-
+              {recipe.servings && <div className="detail-meta-chip">🍽 {recipe.servings} servings</div>}
             </div>
           </div>
 
@@ -222,21 +231,45 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
               </div>
             )}
 
+            {recipe.rawIngredients?.length > 0 && (
+              <div>
+                <div className="detail-section-label">Ingredients</div>
+                <ul className="detail-ingredients">
+                  {recipe.rawIngredients.map((ing, i) => <li key={i}>{ing}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {recipe.instructions?.length > 0 && (
+              <div>
+                <div className="detail-section-label">Instructions</div>
+                <ol className="detail-instructions">
+                  {recipe.instructions.map((step, i) => <li key={i}>{step}</li>)}
+                </ol>
+              </div>
+            )}
+
             <div>
-              <div className="detail-section-label">PDF</div>
+              <div className="detail-section-label">Attachment</div>
               {recipe.pdfUrl ? (
-                <a href={recipe.pdfUrl} target="_blank" rel="noopener noreferrer" className="detail-link">
-                  <span className="detail-link-icon">📄</span>
-                  <div className="detail-link-text">
-                    <div className="detail-link-label">View PDF</div>
-                    <div className="detail-link-url">{recipe.pdfUrl}</div>
-                  </div>
-                  <span className="detail-link-arrow">›</span>
-                </a>
+                /\.(jpe?g|png|gif|webp)(\?|$)/i.test(recipe.pdfUrl) ? (
+                  <a href={recipe.pdfUrl} target="_blank" rel="noopener noreferrer">
+                    <img src={recipe.pdfUrl} alt="Recipe" className="detail-attachment-img"/>
+                  </a>
+                ) : (
+                  <a href={recipe.pdfUrl} target="_blank" rel="noopener noreferrer" className="detail-link">
+                    <span className="detail-link-icon">📄</span>
+                    <div className="detail-link-text">
+                      <div className="detail-link-label">View PDF</div>
+                      <div className="detail-link-url">{recipe.pdfUrl}</div>
+                    </div>
+                    <span className="detail-link-arrow">›</span>
+                  </a>
+                )
               ) : (
-                <div className="detail-pdf-placeholder" style={{opacity:0.5, cursor:"pointer"}} onClick={startEdit}>
-                  <span style={{fontSize:18}}>📄</span>
-                  <span>No PDF yet — tap Edit to add a link</span>
+                <div className="detail-pdf-placeholder" style={{opacity:0.5}}>
+                  <span style={{fontSize:18}}>📎</span>
+                  <span>No file attached — tap Edit to upload</span>
                 </div>
               )}
             </div>
@@ -269,7 +302,7 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
                 <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
                 <div style={{display:"flex", alignItems:"center", gap:8}}>
                   <input className="form-input" style={{flex:1}} placeholder="https://…" value={eUrl} onChange={e => setEUrl(e.target.value)}
-                    onBlur={async () => { if (eUrl.trim()) { const t = await fetchThumbnail(eUrl.trim()); if (t) setEThumbnailUrl(t); }}}/>
+                    onBlur={async () => { if (eUrl.trim()) { const { thumbnailUrl: t, scrapedData } = await fetchRecipeData(eUrl.trim()); if (t) setEThumbnailUrl(t); if (scrapedData?.servings) setEServings(scrapedData.servings); }}}/>
                   {eThumbnailUrl && <img src={eThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
                 </div>
               </div>
@@ -289,6 +322,10 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
                 <div className="form-field">
                   <label className="form-label">Cook time (min)</label>
                   <input className="form-input" type="number" value={eTime} onChange={e => setETime(e.target.value)}/>
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Servings</label>
+                  <input className="form-input" placeholder="e.g. 4" value={eServings || ""} onChange={e => setEServings(e.target.value)}/>
                 </div>
               </div>
               <div className="form-field">
@@ -310,8 +347,8 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
                 <div className="ingredient-tags" onClick={e => e.currentTarget.querySelector("input")?.focus()}>
                   {eIngr.map((ing, i) => (
                     <span key={i} className="ingredient-tag">
-                      {ing}
-                      <button className="ingredient-tag-remove" onClick={() => removeEIngr(i)}>×</button>
+                      <span style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); setEIngrInput(ing); removeEIngr(i); }}>{ing}</span>
+                      <button className="ingredient-tag-remove" onClick={e => { e.stopPropagation(); removeEIngr(i); }}>×</button>
                     </span>
                   ))}
                   <input
@@ -332,9 +369,32 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
                 <div className="ingredient-tag-hint">Enter or comma to add · skip pantry staples</div>
               </div>
               <div className="form-field">
-                <label className="form-label">PDF link <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <input className="form-input" placeholder="https://… or Google Drive link" value={ePdfUrl}
-                  onChange={e => setEPdfUrl(e.target.value)}/>
+                <label className="form-label">Attachment <span style={{fontWeight:400,color:"var(--ink4)"}}>PDF or image</span></label>
+                {ePdfUrl && (
+                  <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:6}}>
+                    {/\.(jpe?g|png|gif|webp)(\?|$)/i.test(ePdfUrl)
+                      ? <img src={ePdfUrl} alt="" style={{width:48, height:48, borderRadius:6, objectFit:"cover"}}/>
+                      : <span style={{fontSize:13, color:"var(--ink3)"}}>📄 PDF attached</span>}
+                    <button type="button" style={{fontSize:11, color:"var(--ink4)", background:"none", border:"1px solid var(--border)", borderRadius:6, padding:"3px 8px", cursor:"pointer"}}
+                      onClick={async () => { await removeRecipeFile(recipe.id, ePdfUrl); setEPdfUrl(""); }}>Remove</button>
+                  </div>
+                )}
+                <label className="detail-upload-btn">
+                  {eUploading ? "Uploading…" : (ePdfUrl ? "Replace file" : "Upload file")}
+                  <input type="file" accept="image/*,.pdf" style={{display:"none"}}
+                    disabled={eUploading}
+                    onChange={async e => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setEUploading(true);
+                      try {
+                        const url = await uploadRecipeFile(recipe.id, file);
+                        setEPdfUrl(url);
+                      } catch (err) { console.error(err); }
+                      setEUploading(false);
+                      e.target.value = "";
+                    }}/>
+                </label>
               </div>
             </div>
           </div>
@@ -355,15 +415,32 @@ function RecipeDetailSheet({ recipe, onClose, onSave, onDelete, customTags = [],
 function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
   time, setTime, tags, setTags, ingredients, setIngredients, ingrInput, setIngrInput,
   category, setCategory, customTags = [], customCategories = [],
-  thumbnailUrl, setThumbnailUrl }) {
+  thumbnailUrl, setThumbnailUrl,
+  description, setDescription, servings, setServings,
+  instructions, setInstructions,
+  rawIngredients, setRawIngredients,
+  setFetchLoading: setFetchLoadingProp }) {
 
-  const [thumbLoading, setThumbLoading] = useState(false);
+  const [fetchLoading, setFetchLoadingLocal] = useState(false);
+  const setFetchLoading = v => { setFetchLoadingLocal(v); if (setFetchLoadingProp) setFetchLoadingProp(v); };
+  const [scraped, setScraped] = useState(false);
   const handleUrlBlur = async () => {
-    if (!url.trim() || !setThumbnailUrl) return;
-    setThumbLoading(true);
-    const thumb = await fetchThumbnail(url.trim());
-    if (thumb) setThumbnailUrl(thumb);
-    setThumbLoading(false);
+    if (!url.trim()) return;
+    setFetchLoading(true);
+    setScraped(false);
+    const { thumbnailUrl: thumb, scrapedData } = await fetchRecipeData(url.trim());
+    if (thumb && setThumbnailUrl) setThumbnailUrl(thumb);
+    if (scrapedData) {
+      if (!title.trim() && scrapedData.title) setTitle(scrapedData.title);
+      if ((!time || time === "" || time === "30") && scrapedData.cookTime) setTime(String(scrapedData.cookTime));
+      if (setRawIngredients && scrapedData.ingredients) setRawIngredients(scrapedData.ingredients);
+      if ((!ingredients || ingredients.length === 0) && scrapedData.ingredients) setIngredients(scrapedData.ingredients);
+      if (setDescription && scrapedData.description) setDescription(scrapedData.description);
+      if (setServings && scrapedData.servings) setServings(scrapedData.servings);
+      if (setInstructions && scrapedData.instructions) setInstructions(scrapedData.instructions);
+      setScraped(true);
+    }
+    setFetchLoading(false);
   };
   const toggleTag = t => setTags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t]);
   const addIngr = val => {
@@ -372,6 +449,7 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
     setIngrInput("");
   };
   const removeIngr = i => setIngredients(ii => ii.filter((_, idx) => idx !== i));
+  const editIngr = i => { setIngrInput(ingredients[i]); removeIngr(i); };
 
   return (
     <div style={{paddingBottom:8}}>
@@ -390,9 +468,10 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
         <div style={{display:"flex", alignItems:"center", gap:8}}>
           <input className="form-input" style={{flex:1}} placeholder="https://…" value={url}
             onChange={e => setUrl(e.target.value)} onBlur={handleUrlBlur}/>
-          {thumbLoading && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
-          {!thumbLoading && thumbnailUrl && <img src={thumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
+          {fetchLoading && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
+          {!fetchLoading && thumbnailUrl && <img src={thumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
         </div>
+        {scraped && <div style={{fontSize:10, color:"var(--sage)", marginTop:3, fontStyle:"italic"}}>Filled from recipe page</div>}
       </div>
       <div className="form-field">
         <label className="form-label">Category</label>
@@ -412,6 +491,13 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
           <input className="form-input" type="number" placeholder="30" value={time}
             onChange={e => setTime(e.target.value)}/>
         </div>
+        {setServings && (
+          <div className="form-field">
+            <label className="form-label">Servings</label>
+            <input className="form-input" placeholder="e.g. 4" value={servings || ""}
+              onChange={e => setServings(e.target.value)}/>
+          </div>
+        )}
       </div>
       <div className="form-field">
         <label className="form-label">Tags</label>
@@ -428,8 +514,8 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
         <div className="ingredient-tags" onClick={e => e.currentTarget.querySelector("input")?.focus()}>
           {ingredients.map((ing, i) => (
             <span key={i} className="ingredient-tag">
-              {ing}
-              <button className="ingredient-tag-remove" onClick={() => removeIngr(i)}>×</button>
+              <span style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); editIngr(i); }}>{ing}</span>
+              <button className="ingredient-tag-remove" onClick={e => { e.stopPropagation(); removeIngr(i); }}>×</button>
             </span>
           ))}
           <input
@@ -465,6 +551,11 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
   const [ingredients,setIngredients]= useState(prefill.ingredients || []);
   const [ingrInput,  setIngrInput]  = useState("");
   const [thumbnailUrl, setThumbnailUrl] = useState(prefill.thumbnailUrl || null);
+  const [description, setDescription] = useState(prefill.description || null);
+  const [servings, setServings] = useState(prefill.servings || null);
+  const [instructions, setInstructions] = useState(prefill.instructions || []);
+  const [rawIngredients, setRawIngredients] = useState(prefill.rawIngredients || []);
+  const [fetchLoading, setFetchLoading] = useState(false);
 
   const handleSave = () => {
     if (!title.trim()) return;
@@ -478,6 +569,10 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
       tags,
       ingredients,
       thumbnailUrl,
+      description: description || null,
+      instructions,
+      servings: servings || null,
+      rawIngredients,
     });
     onClose();
   };
@@ -502,10 +597,15 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
             ingrInput={ingrInput}     setIngrInput={setIngrInput}
             customTags={customTags}   customCategories={customCategories}
             thumbnailUrl={thumbnailUrl} setThumbnailUrl={setThumbnailUrl}
+            description={description} setDescription={setDescription}
+            servings={servings} setServings={setServings}
+            instructions={instructions} setInstructions={setInstructions}
+            rawIngredients={rawIngredients} setRawIngredients={setRawIngredients}
+            setFetchLoading={setFetchLoading}
           />
         </div>
         <div className="sheet-footer">
-          <button className="sheet-btn sheet-btn-primary" disabled={!title.trim()} onClick={handleSave}>
+          <button className="sheet-btn sheet-btn-primary" disabled={!title.trim() || fetchLoading} onClick={handleSave}>
             Save to library
           </button>
           <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>Cancel</button>
@@ -688,7 +788,10 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
   const [newTags, setNewTags]           = useState([]);
   const [newPrepNote, setNewPrepNote]   = useState("");
   const [newThumbnailUrl, setNewThumbnailUrl] = useState(null);
-
+  const [newDescription, setNewDescription] = useState(null);
+  const [newServings, setNewServings] = useState(null);
+  const [newInstructions, setNewInstructions] = useState([]);
+  const [newRawIngredients, setNewRawIngredients] = useState([]);
 
   const [deductPrompt, setDeductPrompt] = useState(null);
   const [noteText, setNoteText] = useState(targetDay?.note || "");
@@ -736,6 +839,10 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
       ingredients: newIngredients,
       prepNote: newPrepNote.trim() || undefined,
       thumbnailUrl: newThumbnailUrl,
+      description: newDescription || null,
+      instructions: newInstructions,
+      servings: newServings || null,
+      rawIngredients: newRawIngredients,
       _unsaved: !saveToLibrary,
     };
     if (saveToLibrary) onAddRecipe(recipe);
@@ -922,7 +1029,20 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
                 <div style={{display:"flex", alignItems:"center", gap:8}}>
                   <input className="form-input" style={{flex:1}} placeholder="https://…" value={newUrl}
                     onChange={e => setNewUrl(e.target.value)}
-                    onBlur={async () => { if (newUrl.trim()) { const t = await fetchThumbnail(newUrl.trim()); if (t) setNewThumbnailUrl(t); }}}/>
+                    onBlur={async () => {
+                      if (!newUrl.trim()) return;
+                      const { thumbnailUrl: t, scrapedData } = await fetchRecipeData(newUrl.trim());
+                      if (t) setNewThumbnailUrl(t);
+                      if (scrapedData) {
+                        if (!newTitle.trim() && scrapedData.title) setNewTitle(scrapedData.title);
+                        if (newTime === "30" && scrapedData.cookTime) setNewTime(String(scrapedData.cookTime));
+                        if (!newIngredients.length && scrapedData.ingredients) setNewIngr(scrapedData.ingredients);
+                        if (scrapedData.description) setNewDescription(scrapedData.description);
+                        if (scrapedData.servings) setNewServings(scrapedData.servings);
+                        if (scrapedData.instructions) setNewInstructions(scrapedData.instructions);
+                        if (scrapedData.ingredients) setNewRawIngredients(scrapedData.ingredients);
+                      }
+                    }}/>
                   {newThumbnailUrl && <img src={newThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
                 </div>
               </div>
@@ -936,8 +1056,8 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
                 <div className="ingredient-tags" onClick={e => e.currentTarget.querySelector("input")?.focus()}>
                   {newIngredients.map((ing, i) => (
                     <span key={i} className="ingredient-tag">
-                      {ing}
-                      <button className="ingredient-tag-remove" onClick={() => setNewIngr(ii => ii.filter((_,idx) => idx !== i))}>×</button>
+                      <span style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); setNewIngrInput(ing); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>{ing}</span>
+                      <button className="ingredient-tag-remove" onClick={e => { e.stopPropagation(); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>×</button>
                     </span>
                   ))}
                   <input className="ingredient-tag-input"
@@ -1847,7 +1967,7 @@ function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCust
     setThumbMsg(`Fetching ${missing.length} thumbnail${missing.length > 1 ? "s" : ""}…`);
     let remaining = missing.length;
     await Promise.all(missing.map(async (r) => {
-      const thumb = await fetchThumbnail(r.url);
+      const { thumbnailUrl: thumb } = await fetchRecipeData(r.url);
       if (thumb) {
         const updated = { ...r, thumbnailUrl: thumb };
         setRecipes(prev => prev.map(p => p.id === r.id ? updated : p));
