@@ -684,12 +684,14 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
 // ── Shopping Sheet ────────────────────────────────────────────────────────────
 
 function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAddRegular, onRemoveRegular,
-  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters, shopSectionKeywords }) {
+  regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, onEditFreeShop, shopFilters, shopSectionKeywords }) {
 
   const [freeInput, setFreeInput] = useState("");
   const [unfilteredIds, setUnfilteredIds] = useState(new Set());
   const [dismissedIds, setDismissedIds] = useState(new Set());
   const [popoverId, setPopoverId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [edits, setEdits] = useState({});
 
   const toggleReg  = id => onToggleRegChecked(id);
   const removeReg  = id => onRemoveRegular(id);
@@ -769,10 +771,20 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
     grouped[sec].push(item);
   });
 
+  const commitEdit = (item, value) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === item.text) { setEditingId(null); return; }
+    setEdits(prev => ({ ...prev, [item.id]: trimmed }));
+    if (item.done !== undefined && onEditFreeShop) onEditFreeShop(item.id, trimmed);
+    setEditingId(null);
+  };
+
   const renderRow = (item) => {
     const checked = item._checked;
     const isDup = !item._isReg && dupMap.has(item.id);
     const wasUnfiltered = !item._isReg && unfilteredIds.has(item.id);
+    const displayText = edits[item.id] || item.text;
+    const isEditing = editingId === item.id;
     const toggle = () => {
       if (item._isReg) toggleReg(item._regId);
       else if (item.done !== undefined) toggleFreeShop(item.id);
@@ -781,10 +793,17 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
     return (
       <div key={item.id} className={"shop-col-item" + (checked ? " done-item" : "") + (isDup && !checked ? " duplicate-item" : "")}
            style={checked ? {textDecoration:"line-through", position:"relative"} : {position:"relative"}}
-           onClick={() => { if (isDup && !checked) setPopoverId(popoverId === item.id ? null : item.id); }}>
+           onClick={() => { if (!isEditing && isDup && !checked) setPopoverId(popoverId === item.id ? null : item.id); }}>
         <input type="checkbox" checked={checked} onChange={toggle}/>
         <div style={{flex:1,minWidth:0}}>
-          <div className="shop-col-text">{item.text}</div>
+          {isEditing ? (
+            <input className="shop-edit-input" autoFocus defaultValue={displayText}
+              onClick={e => e.stopPropagation()}
+              onBlur={e => commitEdit(item, e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingId(null); }}/>
+          ) : (
+            <div className="shop-col-text" onClick={e => { e.stopPropagation(); setEditingId(item.id); }}>{displayText}</div>
+          )}
           <div className="shop-col-source">{item.sourceLabel}</div>
         </div>
         {wasUnfiltered && !checked && (
@@ -1723,11 +1742,13 @@ function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], cus
 }
 
 // ── Inline Shopping List (week tab) ──────────────────────────────────────────
-function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, shopFilters, shopSectionKeywords }) {
+function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, onEditFreeShop, shopFilters, shopSectionKeywords }) {
   const [freeInput, setFreeInput] = useState("");
   const [unfilteredIds, setUnfilteredIds] = useState(new Set());
   const [dismissedIds, setDismissedIds] = useState(new Set());
   const [popoverId, setPopoverId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [edits, setEdits] = useState({});
 
   const okStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
   const freezerNames  = (freezer || []).map(i => i.item.toLowerCase());
@@ -1797,10 +1818,20 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
     grouped[sec].push(item);
   });
 
+  const commitEdit = (item, value) => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === item.text) { setEditingId(null); return; }
+    setEdits(prev => ({ ...prev, [item.id]: trimmed }));
+    if (item.done !== undefined && onEditFreeShop) onEditFreeShop(item.id, trimmed);
+    setEditingId(null);
+  };
+
   const renderRow = (item) => {
     const isDup = !item._isReg && dupMap.has(item.id);
     const wasUnfiltered = !item._isReg && unfilteredIds.has(item.id);
     const checked = item._checked;
+    const displayText = edits[item.id] || item.text;
+    const isEditing = editingId === item.id;
     const toggle = () => {
       if (item._isReg) onToggleRegChecked(item._regId);
       else toggleItem(item);
@@ -1808,12 +1839,20 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
     return (
       <div key={item.id} className={"week-shop-row" + (checked ? " done" : "") + (isDup && !checked ? " duplicate-item" : "")}
         onClick={(e) => {
+          if (isEditing) return;
           if (isDup && !checked) { e.stopPropagation(); setPopoverId(popoverId === item.id ? null : item.id); }
           else toggle();
         }}>
         <input type="checkbox" checked={checked} onChange={toggle} onClick={e => e.stopPropagation()}/>
         <div style={{flex:1, minWidth:0}}>
-          <div className="week-shop-row-text">{item.text}</div>
+          {isEditing ? (
+            <input className="shop-edit-input" autoFocus defaultValue={displayText}
+              onClick={e => e.stopPropagation()}
+              onBlur={e => commitEdit(item, e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") { setEditingId(null); }}}/>
+          ) : (
+            <div className="week-shop-row-text" onClick={e => { e.stopPropagation(); setEditingId(item.id); }}>{displayText}</div>
+          )}
           <div className="week-shop-row-source">{item.sourceLabel}</div>
         </div>
         {wasUnfiltered && !checked && (
@@ -1870,13 +1909,31 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   );
 }
 
+// ── Shop View (own tab) ───────────────────────────────────────────────────────
+
+function ShopView({ week, staples, freezer, fridge, regulars, regChecked, onToggleRegChecked, shopChecked, onToggleShopChecked, freeShop, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, onEditFreeShop, shopFilters, shopSectionKeywords }) {
+  return (
+    <div className="tab-section">
+      <div style={{marginBottom:16}}>
+        <div className="page-title">Shopping List</div>
+      </div>
+      <WeekShoppingList
+        week={week} staples={staples} freezer={freezer} fridge={fridge}
+        regulars={regulars} regChecked={regChecked} onToggleRegChecked={onToggleRegChecked}
+        shopChecked={shopChecked} onToggleShopChecked={onToggleShopChecked}
+        freeShop={freeShop} onAddFreeShop={onAddFreeShop} onToggleFreeShop={onToggleFreeShop} onRemoveFreeShop={onRemoveFreeShop} onEditFreeShop={onEditFreeShop}
+        shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords}
+      />
+    </div>
+  );
+}
+
 // ── Week View ─────────────────────────────────────────────────────────────────
 
-function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
+function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, customTags, customCategories,
   batch, prepTasks, prepChecked, onAddItem, onRemoveItem, onMoveItem, onClearDay, onAddNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
-  onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onRemoveFreeShop, onAdjustFreezerQty, shopFilters, shopSectionKeywords }) {
-  const [shopOpen, setShopOpen]     = useState(true);
+  onAdjustFreezerQty }) {
   const [prepOpen, setPrepOpen]     = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
   const [promoteSheet, setPromoteSheet] = useState(null);
@@ -2027,9 +2084,6 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
                 onClick={() => setConfirmReset(false)}>Cancel</button>
             </div>
           )}
-          <button className="shop-fab" onClick={onOpenShop}>
-            🛒 List{shopCount > 0 && <span className="shop-count-badge">{shopCount}</span>}
-          </button>
         </div>
       </div>
 
@@ -2220,19 +2274,6 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
         </div>
       </div>}
 
-      <div className="section-header" onClick={() => setShopOpen(o => !o)}>
-        <div className="section-header-title">Shopping <em>List</em></div>
-        <span className={"section-header-chevron" + (shopOpen ? " open" : "")}>▼</span>
-      </div>
-      {shopOpen && (
-        <WeekShoppingList
-          week={week} staples={staples} freezer={freezer} fridge={fridge}
-          regulars={regulars} regChecked={regChecked} onToggleRegChecked={onToggleRegChecked}
-          shopChecked={shopChecked} onToggleShopChecked={onToggleShopChecked}
-          freeShop={freeShop} onAddFreeShop={onAddFreeShop} onToggleFreeShop={onToggleFreeShop} onRemoveFreeShop={onRemoveFreeShop}
-          shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords}
-        />
-      )}
 
       {promoteSheet && (
         <div className="sheet-overlay" onClick={() => setPromoteSheet(null)}>
@@ -2872,6 +2913,7 @@ function PrefsView({ goals, updateGoal, customTags, onAddCustomTag, onRemoveCust
 
 const TABS = [
   {id:"week",    icon:"📅", label:"Week"},
+  {id:"shop",    icon:"🛒", label:"Shop"},
   {id:"recipes", icon:"📖", label:"Recipes"},
   {id:"pantry",  icon:"🥬", label:"Pantry"},
   {id:"prefs",   icon:"⚙️", label:"Prefs"},
@@ -2889,7 +2931,6 @@ export default function App() {
   const [regChecked, setRegChecked]   = useState({});
   const [shopChecked, setShopChecked] = useState({});
   const [freeShop, setFreeShop]       = useState([]);
-  const [shopSheetOpen, setShopSheetOpen] = useState(false);
   const [fridge, setFridge] = useState([]);
   const [customTags, setCustomTags]             = useState([]);
   const [customCategories, setCustomCategories] = useState([]);
@@ -3407,6 +3448,10 @@ export default function App() {
     setFreeShop(f => f.filter(i => i.id !== id));
     try { await dbRemoveFreeShopItem(id); } catch (e) { console.error(e); }
   };
+  const handleEditFreeShop = async (id, text) => {
+    setFreeShop(f => f.map(i => i.id === id ? { ...i, text } : i));
+    try { await dbUpdateFreeShopItem(id, { text }); } catch (e) { console.error(e); }
+  };
 
   // ── Prep tasks handlers ──
   const handleAddPrepTask = async (task) => {
@@ -3452,13 +3497,17 @@ export default function App() {
   const totalUnchecked = regsLeft + [...new Set(recipeIngCount)].filter(i => !shopChecked["Mon:"+i] && !shopChecked["Tue:"+i]).length + stapleNeedCount + freeShop.filter(f => !f.done).length;
 
   const views = {
-    week:    <WeekView goals={goals} week={week} recipes={library} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} staples={staples} regulars={regulars} regChecked={regChecked} shopChecked={shopChecked} freeShop={freeShop} radar={radar} customTags={customTags} customCategories={customCategories}
+    week:    <WeekView goals={goals} week={week} recipes={library} fridge={fridge} freezer={freezer} staples={staples} radar={radar} customTags={customTags} customCategories={customCategories}
       batch={batch} prepTasks={prepTasks} prepChecked={prepChecked}
       onAddItem={handleAddItem} onRemoveItem={handleRemoveItem} onMoveItem={handleMoveItem} onClearDay={handleClearDay} onAddNote={handleAddNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
-      onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop} shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords}
       onAdjustFreezerQty={handleAdjustFreezerQty} />,
+    shop:    <ShopView week={week} staples={staples} freezer={freezer} fridge={fridge}
+      regulars={regulars} regChecked={regChecked} onToggleRegChecked={handleToggleRegChecked}
+      shopChecked={shopChecked} onToggleShopChecked={handleToggleShopChecked}
+      freeShop={freeShop} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop} onEditFreeShop={handleEditFreeShop}
+      shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords} />,
     recipes: <RecipesView recipes={recipes} library={library} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} onPromoteRadar={handlePromoteRadar} customTags={customTags} customCategories={customCategories} />,
     pantry:  <InventoryView week={week} recipes={recipes} staples={staples} onAddStaple={handleAddStaple} onCycleStaple={handleCycleStaple} onRemoveStaple={handleRemoveStaple} regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular} fridge={fridge} onAddFridge={handleAddFridge} onCycleFridge={handleCycleFridge} onRemoveFridge={handleRemoveFridge} freezer={freezer} onAddFreezer={handleAddFreezer} onAdjustFreezerQty={handleAdjustFreezerQty} onRemoveFreezer={handleRemoveFreezer} />,
     prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} shopFilters={shopFilters} onAddShopFilter={handleAddShopFilter} onRemoveShopFilter={handleRemoveShopFilter} shopSectionKeywords={shopSectionKeywords} onAddShopSectionKeyword={handleAddShopSectionKeyword} onRemoveShopSectionKeyword={handleRemoveShopSectionKeyword} recipes={recipes} setRecipes={setRecipes} />,
@@ -3476,20 +3525,6 @@ export default function App() {
           )}
           {views[tab]}
         </div>
-        {shopSheetOpen && (
-          <ShoppingSheet
-            onClose={() => setShopSheetOpen(false)}
-            week={week}
-            staples={staples}
-            freezer={freezer}
-            fridge={fridge}
-            regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular}
-            regChecked={regChecked} onToggleRegChecked={handleToggleRegChecked}
-            shopChecked={shopChecked} onToggleShopChecked={handleToggleShopChecked}
-            freeShop={freeShop} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} onRemoveFreeShop={handleRemoveFreeShop}
-            shopFilters={shopFilters} shopSectionKeywords={shopSectionKeywords}
-          />
-        )}
         <nav className="tabs">
           {TABS.map(t => (
             <div key={t.id} className={"tab"+(tab===t.id?" active":"")} onClick={() => setTab(t.id)}>

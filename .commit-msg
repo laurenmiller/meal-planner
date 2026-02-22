@@ -1,1 +1,1 @@
-Refactor shopping list: line-per-item checkboxes replacing pills, merge weekly regulars into supermarket sections, show item source (recipe name, pantry restock, every week, added); add shopping section keyword editor in Prefs with Supabase persistence
+Move shopping list to its own tab; remove from week view and FAB overlay; add ShopView wrapper component

@@ -226,6 +226,8 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .dup-popover { position: absolute; background: var(--surface); border: 1px solid var(--gold-light); border-radius: 8px; padding: 6px 10px; font-size: 11px; color: var(--ink2); box-shadow: 0 2px 8px rgba(0,0,0,0.10); z-index: 100; white-space: nowrap; top: 100%; left: 0; margin-top: 4px; }
 .shop-col-item.duplicate-item { background: var(--gold-pale); border-left: 2px solid var(--gold-light); }
 .week-shop-empty { font-size: 12px; color: var(--ink4); font-style: italic; padding: 6px 0 10px; }
+.shop-edit-input { font-family: 'Lato', sans-serif; font-size: 12.5px; color: var(--ink); border: 1px solid var(--accent); border-radius: 4px; padding: 2px 6px; width: 100%; box-sizing: border-box; outline: none; background: var(--surface); }
+.shop-col-item .shop-edit-input { font-size: 13px; }
 
 /* ── Batch cards ── */
 .batch-section { padding: 0 18px; margin-bottom: 4px; }
@@ -670,7 +672,6 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
     padding-top: 0;
     padding-bottom: 24px;
     width: calc(100% - 200px);
-    max-width: 900px;
   }
 
   /* Remove phone border-bottom, already handled by sidebar border-right */
@@ -685,13 +686,13 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
   .content {
     padding-left: 32px;
     padding-right: 32px;
-    max-width: 1100px;
     margin-left: 200px;
-    margin-right: auto;
   }
 
-  /* Week scroll: wider columns on desktop */
-  .day-col { flex: 0 0 160px; }
+  /* Week: columns fill available space on desktop, no horizontal scroll */
+  .week-scroll { overflow-x: visible; flex-wrap: wrap; }
+  .week-scroll-fade { display: none; }
+  .day-col { flex: 1 1 140px; min-width: 0; }
 
   /* Recipe library: fixed-size tiles, auto-fill */
   .rlist {
@@ -709,7 +710,6 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 
   .content {
     margin-left: 220px;
-    max-width: 900px;
   }
 }
 
