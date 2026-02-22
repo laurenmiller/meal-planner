@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './styles.css';
 import { supabase } from './lib/supabase.js';
 import {
@@ -446,11 +446,15 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
   const [uploading, setUploading] = useState(false);
   const setFetchLoading = v => { setFetchLoadingLocal(v); if (setFetchLoadingProp) setFetchLoadingProp(v); };
   const [scraped, setScraped] = useState(false);
-  const handleUrlBlur = async () => {
-    if (!url.trim()) return;
+  const debounceRef = useRef(null);
+  const lastFetchedUrl = useRef("");
+  const doScrape = async (urlVal) => {
+    const trimmed = urlVal.trim();
+    if (!trimmed || trimmed === lastFetchedUrl.current) return;
+    lastFetchedUrl.current = trimmed;
     setFetchLoading(true);
     setScraped(false);
-    const { thumbnailUrl: thumb, scrapedData } = await fetchRecipeData(url.trim());
+    const { thumbnailUrl: thumb, scrapedData } = await fetchRecipeData(trimmed);
     if (thumb && setThumbnailUrl) setThumbnailUrl(thumb);
     if (scrapedData) {
       if (!title.trim() && scrapedData.title) setTitle(scrapedData.title);
@@ -462,7 +466,17 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
       if (setInstructions && scrapedData.instructions) setInstructions(scrapedData.instructions);
       setScraped(true);
     }
+    try { if (setSource && !source.trim()) setSource(new URL(trimmed).hostname.replace(/^www\./, '')); } catch {}
     setFetchLoading(false);
+  };
+  const handleUrlBlur = () => {
+    if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
+    doScrape(url);
+  };
+  const handleUrlChange = (val) => {
+    setUrl(val);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doScrape(val), 800);
   };
   const toggleTag = t => setTags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t]);
   const addIngr = val => {
@@ -489,7 +503,7 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
         <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
         <div style={{display:"flex", alignItems:"center", gap:8}}>
           <input className="form-input" style={{flex:1}} placeholder="https://…" value={url}
-            onChange={e => setUrl(e.target.value)} onBlur={handleUrlBlur}/>
+            onChange={e => handleUrlChange(e.target.value)} onBlur={handleUrlBlur}/>
           {fetchLoading && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
           {!fetchLoading && thumbnailUrl && <img src={thumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
         </div>
@@ -609,10 +623,11 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
   const [recipeId] = useState(() => Date.now());
 
   const handleSave = () => {
-    if (!title.trim()) return;
+    if (!title.trim() && !url.trim()) return;
+    const fallbackTitle = title.trim() || (() => { try { return new URL(url.trim()).hostname.replace(/^www\./, ''); } catch { return url.trim(); } })();
     onAdd({
       id: recipeId,
-      title: title.trim(),
+      title: fallbackTitle,
       source: source.trim() || "Added manually",
       url: url.trim() || null,
       category: category || "dinner",
@@ -658,7 +673,7 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
           />
         </div>
         <div className="sheet-footer">
-          <button className="sheet-btn sheet-btn-primary" disabled={!title.trim() || fetchLoading} onClick={handleSave}>
+          <button className="sheet-btn sheet-btn-primary" disabled={(!title.trim() && !url.trim()) || fetchLoading} onClick={handleSave}>
             Save to library
           </button>
           <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>Cancel</button>
@@ -968,9 +983,13 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
   const [newInstructions, setNewInstructions] = useState([]);
   const [newRawIngredients, setNewRawIngredients] = useState([]);
 
+  const [fetchLoading, setFetchLoading] = useState(false);
+  const [scraped, setScraped] = useState(false);
+  const urlDebounceRef = useRef(null);
+  const lastFetchedUrlRef = useRef("");
+
   const [deductPrompt, setDeductPrompt] = useState(null);
   const [noteText, setNoteText] = useState(targetDay?.note || "");
-  const [radarOpen, setRadarOpen] = useState(false);
   // deductPrompt: { recipe, matches: [{freezerItem, qty}] }
 
   const filtered = recipes.filter(r =>
@@ -1002,11 +1021,43 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
     onClose();
   };
 
+  const doUrlScrape = async (urlVal) => {
+    const trimmed = urlVal.trim();
+    if (!trimmed || trimmed === lastFetchedUrlRef.current) return;
+    lastFetchedUrlRef.current = trimmed;
+    setFetchLoading(true);
+    setScraped(false);
+    const { thumbnailUrl: t, scrapedData } = await fetchRecipeData(trimmed);
+    if (t) setNewThumbnailUrl(t);
+    if (scrapedData) {
+      if (!newTitle.trim() && scrapedData.title) setNewTitle(scrapedData.title);
+      if (newTime === "30" && scrapedData.cookTime) setNewTime(String(scrapedData.cookTime));
+      if (!newIngredients.length && scrapedData.ingredients) setNewIngr(scrapedData.ingredients);
+      if (scrapedData.description) setNewDescription(scrapedData.description);
+      if (scrapedData.servings) setNewServings(scrapedData.servings);
+      if (scrapedData.instructions) setNewInstructions(scrapedData.instructions);
+      if (scrapedData.ingredients) setNewRawIngredients(scrapedData.ingredients);
+      setScraped(true);
+    }
+    try { if (!newSource.trim()) setNewSource(new URL(trimmed).hostname.replace(/^www\./, '')); } catch {}
+    setFetchLoading(false);
+  };
+  const handleNewUrlBlur = () => {
+    if (urlDebounceRef.current) { clearTimeout(urlDebounceRef.current); urlDebounceRef.current = null; }
+    doUrlScrape(newUrl);
+  };
+  const handleNewUrlChange = (val) => {
+    setNewUrl(val);
+    if (urlDebounceRef.current) clearTimeout(urlDebounceRef.current);
+    urlDebounceRef.current = setTimeout(() => doUrlScrape(val), 800);
+  };
+
   const handleAddNew = () => {
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() && !newUrl.trim()) return;
+    const fallbackTitle = newTitle.trim() || (() => { try { return new URL(newUrl.trim()).hostname.replace(/^www\./, ''); } catch { return newUrl.trim(); } })();
     const recipe = {
-      title: newTitle.trim(),
-      source: saveToLibrary ? (newSource.trim() || "Added manually") : "Added manually",
+      title: fallbackTitle,
+      source: newSource.trim() || "Added manually",
       url: newUrl.trim() || null,
       category: saveToLibrary ? (newCategory || "dinner") : "dinner",
       tags: saveToLibrary ? newTags : [],
@@ -1019,7 +1070,7 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
       servings: newServings || null,
       rawIngredients: newRawIngredients,
       inLibrary: saveToLibrary,
-      _needsInsert: true, // signals App.handleSlot to insert into DB first
+      _needsInsert: true,
     };
     if (saveToLibrary) onAddRecipe(recipe);
     const matches = checkFreezerMatches(recipe);
@@ -1103,13 +1154,16 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
         <div className="sheet-mode-toggle">
           <button className={"sheet-mode-btn" + (mode==="pick" ? " active" : "")} onClick={() => setMode("pick")}>
-            From library
+            From Library
+          </button>
+          <button className={"sheet-mode-btn" + (mode==="radar" ? " active" : "")} onClick={() => setMode("radar")}>
+            Try Soon
+          </button>
+          <button className={"sheet-mode-btn" + (mode==="url" ? " active" : "")} onClick={() => setMode("url")}>
+            Add URL
           </button>
           <button className={"sheet-mode-btn" + (mode==="note" ? " active" : "")} onClick={() => setMode("note")}>
-            Add note
-          </button>
-          <button className={"sheet-mode-btn" + (mode==="new" ? " active" : "")} onClick={() => setMode("new")}>
-            New recipe
+            Note
           </button>
         </div>
 
@@ -1146,31 +1200,40 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
               </div>
             ))}
 
-            {filtered.length === 0 && !radar?.length && (
+            {filtered.length === 0 && (
               <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic"}}>
                 No recipes match "{search}"
               </div>
             )}
+          </>)}
 
-            {/* Radar items in From Library mode */}
-            {radar && radar.length > 0 && (() => {
-              const filteredRadar = radar.filter(item =>
+          {mode === "radar" && (<>
+            <input
+              className="pick-search"
+              placeholder="Search try soon…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+            />
+            {(() => {
+              const filteredRadar = (radar || []).filter(item =>
                 search === "" || item.title.toLowerCase().includes(search.toLowerCase())
               );
-              if (!filteredRadar.length) return null;
-              return (<>
-                <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginTop:12, marginBottom:6}}>From radar</div>
-                {filteredRadar.map(item => (
-                  <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => handleSlot(item)}>
-                    <div className="pick-thumb" style={{background:"var(--accent-pale)", color:"var(--accent)"}}>✦</div>
-                    <div style={{flex:1, minWidth:0}}>
-                      <div className="pick-recipe-title">{item.title}</div>
-                      <div className="pick-recipe-meta">{item.source || "Radar"}{item.time ? ` · ${item.time} min` : ""}</div>
-                    </div>
-                    <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
+              if (!filteredRadar.length) return (
+                <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic"}}>
+                  {radar?.length ? `No items match "${search}"` : "Nothing on your Try Soon list yet"}
+                </div>
+              );
+              return filteredRadar.map(item => (
+                <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => handleSlot(item)}>
+                  <div className="pick-thumb" style={{background:"var(--accent-pale)", color:"var(--accent)"}}>✦</div>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div className="pick-recipe-title">{item.title}</div>
+                    <div className="pick-recipe-meta">{item.source || "Try Soon"}{item.time ? ` · ${item.time} min` : ""}</div>
                   </div>
-                ))}
-              </>);
+                  <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
+                </div>
+              ));
             })()}
           </>)}
 
@@ -1200,52 +1263,29 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
             </div>
           )}
 
-          {mode === "new" && (
+          {mode === "url" && (
             <div style={{paddingBottom:8}}>
-              {radar && radar.length > 0 && (
-                <div style={{marginBottom:14}}>
-                  <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:6, cursor:"pointer", userSelect:"none", display:"flex", alignItems:"center", gap:4}} onClick={() => setRadarOpen(o => !o)}>
-                    From radar
-                    <span style={{fontSize:8, transition:"transform 0.2s", display:"inline-block", transform: radarOpen ? "rotate(0deg)" : "rotate(-90deg)"}}>▼</span>
-                  </div>
-                  {radarOpen && radar.map(item => (
-                    <div key={item.id}
-                      onClick={() => { onSlot(dayIndex, item); onClose(); }}
-                      style={{display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border2)", cursor:"pointer"}}>
-                      <span style={{flex:1, fontSize:12, color:"var(--ink2)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{item.title}</span>
-                      {item.url && <span style={{fontSize:10, color:"var(--ink4)"}}>↗</span>}
-                    </div>
-                  ))}
-                  {radarOpen && <div style={{height:12}}/>}
-                </div>
-              )}
-              <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:8}}>New from web</div>
               <div className="form-field">
-                <label className="form-label">Recipe name</label>
+                <label className="form-label">URL</label>
+                <div style={{display:"flex", alignItems:"center", gap:8}}>
+                  <input className="form-input" style={{flex:1}} placeholder="https://…" value={newUrl}
+                    autoFocus
+                    onChange={e => handleNewUrlChange(e.target.value)}
+                    onBlur={handleNewUrlBlur}/>
+                  {fetchLoading && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
+                  {!fetchLoading && newThumbnailUrl && <img src={newThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
+                </div>
+                {scraped && <div style={{fontSize:10, color:"var(--sage)", marginTop:3, fontStyle:"italic"}}>Fetched from page</div>}
+              </div>
+              <div className="form-field">
+                <label className="form-label">Title</label>
                 <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
                   onChange={e => setNewTitle(e.target.value)}/>
               </div>
               <div className="form-field">
-                <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
-                <div style={{display:"flex", alignItems:"center", gap:8}}>
-                  <input className="form-input" style={{flex:1}} placeholder="https://…" value={newUrl}
-                    onChange={e => setNewUrl(e.target.value)}
-                    onBlur={async () => {
-                      if (!newUrl.trim()) return;
-                      const { thumbnailUrl: t, scrapedData } = await fetchRecipeData(newUrl.trim());
-                      if (t) setNewThumbnailUrl(t);
-                      if (scrapedData) {
-                        if (!newTitle.trim() && scrapedData.title) setNewTitle(scrapedData.title);
-                        if (newTime === "30" && scrapedData.cookTime) setNewTime(String(scrapedData.cookTime));
-                        if (!newIngredients.length && scrapedData.ingredients) setNewIngr(scrapedData.ingredients);
-                        if (scrapedData.description) setNewDescription(scrapedData.description);
-                        if (scrapedData.servings) setNewServings(scrapedData.servings);
-                        if (scrapedData.instructions) setNewInstructions(scrapedData.instructions);
-                        if (scrapedData.ingredients) setNewRawIngredients(scrapedData.ingredients);
-                      }
-                    }}/>
-                  {newThumbnailUrl && <img src={newThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
-                </div>
+                <label className="form-label">Source</label>
+                <input className="form-input" placeholder="e.g. NYT Cooking, Smitten Kitchen" value={newSource}
+                  onChange={e => setNewSource(e.target.value)}/>
               </div>
               <div className="form-field">
                 <label className="form-label">Cook time (min)</label>
@@ -1294,11 +1334,6 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
                 {saveToLibrary && (
                   <div>
                     <div className="form-field">
-                      <label className="form-label">Source</label>
-                      <input className="form-input" placeholder="e.g. NYT Cooking, Smitten Kitchen" value={newSource}
-                        onChange={e => setNewSource(e.target.value)}/>
-                    </div>
-                    <div className="form-field">
                       <label className="form-label">Category</label>
                       <div className="cat-select">
                         {[["dinner","Dinner"],["breakfast","Breakfast & Snacks"],["sweets","Sweets"],...customCategories.map(c=>[c,c])].map(([k,l]) => (
@@ -1334,13 +1369,13 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
               Save note
             </button>
           )}
-          {mode === "new" && (
-            <button className="sheet-btn sheet-btn-primary" disabled={!newTitle.trim()} onClick={handleAddNew}>
+          {mode === "url" && (
+            <button className="sheet-btn sheet-btn-primary" disabled={(!newTitle.trim() && !newUrl.trim()) || fetchLoading} onClick={handleAddNew}>
               Plan for {targetDay?.day ?? "this night"}
             </button>
           )}
           <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>
-            {mode === "note" || mode === "new" ? "Back" : "Cancel"}
+            {mode === "note" || mode === "url" ? "Back" : "Cancel"}
           </button>
         </div>
       </div>
@@ -1373,7 +1408,7 @@ function DayCard({ d, today, onClick, onDetail, readyBy }) {
             {source}<span className="source-arrow"> ↗</span>
           </a>
         ) : isRadar ? (
-          <div className="day-source"><em style={{color:"var(--accent)"}}>from radar</em></div>
+          <div className="day-source"><em style={{color:"var(--accent)"}}>try soon</em></div>
         ) : source ? (
           <div className="day-source">{source}</div>
         ) : null}
@@ -2190,15 +2225,29 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
   const [radarTitle, setRadarTitle]   = useState("");
   const [radarUrl, setRadarUrl]       = useState("");
   const [radarSource, setRadarSource] = useState("");
+  const [radarFetching, setRadarFetching] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState({});
   const [radarCollapsed, setRadarCollapsed] = useState(false);
   const toggleSection = key => setCollapsedSections(s => ({...s, [key]: !s[key]}));
   const filters = [{k:"all",l:"All"},{k:"fish",l:"🐟 Fish"},{k:"vegetarian",l:"🌿 Veg"}];
   const filtered = filter === "all" ? library : library.filter(r => r.tags?.includes(filter));
 
+  const handleRadarUrlBlur = async () => {
+    const trimmed = radarUrl.trim();
+    if (!trimmed) return;
+    setRadarFetching(true);
+    const { scrapedData } = await fetchRecipeData(trimmed);
+    if (scrapedData) {
+      if (!radarTitle.trim() && scrapedData.title) setRadarTitle(scrapedData.title);
+    }
+    try { if (!radarSource.trim()) setRadarSource(new URL(trimmed).hostname.replace(/^www\./, '')); } catch {}
+    setRadarFetching(false);
+  };
+
   const handleAddRadar = () => {
-    if (!radarTitle.trim()) return;
-    onAddRadar({ title: radarTitle.trim(), url: radarUrl.trim() || null, source: radarSource.trim() || "" });
+    if (!radarTitle.trim() && !radarUrl.trim()) return;
+    const fallbackTitle = radarTitle.trim() || (() => { try { return new URL(radarUrl.trim()).hostname.replace(/^www\./, ''); } catch { return radarUrl.trim(); } })();
+    onAddRadar({ title: fallbackTitle, url: radarUrl.trim() || null, source: radarSource.trim() || "" });
     setRadarTitle(""); setRadarUrl(""); setRadarSource(""); setAddingRadar(false);
   };
 
@@ -2228,7 +2277,7 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
       <div className="radar-shelf">
         <div className="recipe-library-header" style={{marginTop:0, paddingTop:0, borderTop:"none", marginBottom: radarCollapsed ? 0 : 6, cursor:"pointer", userSelect:"none"}} onClick={() => setRadarCollapsed(c => !c)}>
           <div className="recipe-library-title">
-            On the <em>Radar</em>
+            Try <em>Soon</em>
             <span style={{fontFamily:"'Lato',sans-serif", fontSize:10, color:"var(--ink4)", fontStyle:"normal", marginLeft:6, transition:"transform 0.2s", display:"inline-block", transform: radarCollapsed ? "rotate(-90deg)" : "rotate(0deg)"}}>▼</span>
           </div>
           {!addingRadar && !radarCollapsed && <button style={{fontSize:11, color:"var(--ink4)", background:"none", border:"none", cursor:"pointer", padding:0, fontFamily:"inherit"}} onClick={e => { e.stopPropagation(); setAddingRadar(true); }}>+ Add</button>}
@@ -2258,8 +2307,10 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
               onKeyDown={e => e.key === "Enter" && handleAddRadar()}/>
             <input className="pantry-add-input" placeholder="URL (optional)" value={radarUrl} style={{flex:"3 1 180px"}}
               onChange={e => setRadarUrl(e.target.value)}
+              onBlur={handleRadarUrlBlur}
               onKeyDown={e => e.key === "Enter" && handleAddRadar()}/>
-            <button className="pantry-add-btn" disabled={!radarTitle.trim()} onClick={handleAddRadar}>Add</button>
+            {radarFetching && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
+            <button className="pantry-add-btn" disabled={(!radarTitle.trim() && !radarUrl.trim()) || radarFetching} onClick={handleAddRadar}>Add</button>
             <button className="sheet-btn sheet-btn-cancel" style={{padding:"6px 10px", fontSize:12}} onClick={() => { setAddingRadar(false); setRadarTitle(""); setRadarUrl(""); setRadarSource(""); }}>Cancel</button>
           </div>
         )}
