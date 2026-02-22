@@ -5,7 +5,7 @@ import {
   fetchRecipes, addRecipe as dbAddRecipe, updateRecipe as dbUpdateRecipe, deleteRecipe as dbDeleteRecipe, toAppRecipe,
   fetchWeekPlan, upsertWeekDay, clearWeekPlan,
   fetchBatchPrep, addBatchItem, removeBatchItem, clearBatchPrep,
-  fetchRadar, addRadarItem as dbAddRadarItem, updateRadarItem as dbUpdateRadarItem, removeRadarItem as dbRemoveRadarItem,
+  addRadarItem as dbAddRadarItem, promoteToLibrary as dbPromoteToLibrary,
   fetchFridge, addFridgeItem as dbAddFridgeItem, updateFridgeItem as dbUpdateFridgeItem, removeFridgeItem as dbRemoveFridgeItem,
   fetchFreezer, addFreezerItem as dbAddFreezerItem, updateFreezerItem as dbUpdateFreezerItem, removeFreezerItem as dbRemoveFreezerItem,
   fetchStaples, addStaple as dbAddStaple, updateStaple as dbUpdateStaple, removeStaple as dbRemoveStaple,
@@ -923,7 +923,7 @@ function RadarReviewSheet({ radarItem, scrapedData, onConfirm, onCancel }) {
 // targetDay: the WEEK entry being edited (or null for "pick any unplanned day")
 // onClose, onSlot(dayIndex, recipe), onRemove(dayIndex), onAddRecipe(recipe)
 
-function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot, onSlotRadar, onRemove, onSlotNote, onAddRecipe, freezer, onAdjustFreezerQty, customTags = [], customCategories = [] }) {
+function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot, onRemove, onSlotNote, onAddRecipe, freezer, onAdjustFreezerQty, customTags = [], customCategories = [] }) {
   const [mode, setMode]       = useState(targetDay?.recipe ? "pick" : "pick");
   const [search, setSearch]   = useState("");
   const [newTitle, setNewTitle]         = useState("");
@@ -979,7 +979,6 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
   const handleAddNew = () => {
     if (!newTitle.trim()) return;
     const recipe = {
-      id: Date.now(),
       title: newTitle.trim(),
       source: saveToLibrary ? (newSource.trim() || "Added manually") : "Added manually",
       url: newUrl.trim() || null,
@@ -993,7 +992,8 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
       instructions: newInstructions,
       servings: newServings || null,
       rawIngredients: newRawIngredients,
-      _unsaved: !saveToLibrary,
+      inLibrary: saveToLibrary,
+      _needsInsert: true, // signals App.handleSlot to insert into DB first
     };
     if (saveToLibrary) onAddRecipe(recipe);
     const matches = checkFreezerMatches(recipe);
@@ -1135,11 +1135,11 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
               return (<>
                 <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginTop:12, marginBottom:6}}>From radar</div>
                 {filteredRadar.map(item => (
-                  <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => { onSlotRadar(dayIndex, item); onClose(); }}>
+                  <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => handleSlot(item)}>
                     <div className="pick-thumb" style={{background:"var(--accent-pale)", color:"var(--accent)"}}>✦</div>
                     <div style={{flex:1, minWidth:0}}>
                       <div className="pick-recipe-title">{item.title}</div>
-                      <div className="pick-recipe-meta">{item.source || "Radar"}{item.cookTime ? ` · ${item.cookTime} min` : ""}</div>
+                      <div className="pick-recipe-meta">{item.source || "Radar"}{item.time ? ` · ${item.time} min` : ""}</div>
                     </div>
                     <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
                   </div>
@@ -1184,16 +1184,16 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
                   </div>
                   {radarOpen && radar.map(item => (
                     <div key={item.id}
-                      onMouseDown={e => { e.preventDefault(); setNewTitle(item.title); setNewUrl(item.url || ""); }}
+                      onClick={() => { onSlot(dayIndex, item); onClose(); }}
                       style={{display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border2)", cursor:"pointer"}}>
-                      <span style={{flex:1, fontSize:12, color: newTitle === item.title ? "var(--accent)" : "var(--ink2)", fontWeight: newTitle === item.title ? 700 : 400, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{item.title}</span>
+                      <span style={{flex:1, fontSize:12, color:"var(--ink2)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{item.title}</span>
                       {item.url && <span style={{fontSize:10, color:"var(--ink4)"}}>↗</span>}
                     </div>
                   ))}
                   {radarOpen && <div style={{height:12}}/>}
                 </div>
               )}
-              <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:8}}>From web</div>
+              <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:8}}>New from web</div>
               <div className="form-field">
                 <label className="form-label">Recipe name</label>
                 <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
@@ -1324,18 +1324,18 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onSlot,
 
 // ── Day Card & Stub ───────────────────────────────────────────────────────────
 
-function DayCard({ d, today, onClick, onDetail, readyBy, scraping }) {
-  const time = d.recipe?.time || d.radarCookTime || 30;
-  const title = d.recipe?.title || d.radarTitle || "Untitled";
-  const thumb = d.recipe?.thumbnailUrl || d.radarThumbnailUrl || null;
-  const source = d.recipe?.source || null;
-  const recipeLink = d.recipe ? (d.recipe.pdfUrl || d.recipe.url || null) : null;
+function DayCard({ d, today, onClick, onDetail, readyBy }) {
+  const r = d.recipe;
+  const time = r?.time || 30;
+  const title = r?.title || "Untitled";
+  const thumb = r?.thumbnailUrl || null;
+  const source = r?.source || null;
+  const recipeLink = r ? (r.pdfUrl || r.url || null) : null;
   const start = calcStart(readyBy, time);
-  const isRadar = d.isRadar && !d.recipe;
+  const isRadar = r && !r.inLibrary;
   return (
-    <div className={"day-card" + (today ? " today" : "")} onClick={() => d.recipe ? onDetail(d.recipe) : onClick()}>
+    <div className={"day-card" + (today ? " today" : "")} onClick={() => r ? onDetail(r) : onClick()}>
       {thumb && <img className="day-card-thumb" src={thumb} alt="" />}
-      {scraping && <div className="day-card-loading"/>}
       <button className="day-card-swap" title="Change recipe"
         onClick={e => { e.stopPropagation(); onClick(); }}>⇄</button>
       <div className="day-name">{d.day}</div>
@@ -1346,10 +1346,10 @@ function DayCard({ d, today, onClick, onDetail, readyBy, scraping }) {
             onClick={e => e.stopPropagation()}>
             {source}<span className="source-arrow"> ↗</span>
           </a>
-        ) : source ? (
-          <div className="day-source">{d.recipe?._unsaved ? <em style={{color:"var(--ink4)"}}>not saved</em> : source}</div>
         ) : isRadar ? (
           <div className="day-source"><em style={{color:"var(--accent)"}}>from radar</em></div>
+        ) : source ? (
+          <div className="day-source">{source}</div>
         ) : null}
         <div className="day-recipe-meta">
           <span className="day-time">start {start}</span>
@@ -1386,7 +1386,7 @@ function DayNote({ d, today, onClick }) {
 // Pick from recipe library or add a brand-new recipe.
 // Saves to Sunday Batch Prep (with yield + note fields).
 
-function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = [], customCategories = [] }) {
+function BatchSheet({ recipes, onClose, onAdd, onAddRecipe, customTags = [], customCategories = [] }) {
   const [mode, setMode] = useState("pick");
   const [search, setSearch] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -1405,7 +1405,6 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
   const [newInstructions, setNewInstructions] = useState([]);
   const [newRawIngredients, setNewRawIngredients] = useState([]);
   const [saveToLibrary, setSaveToLibrary] = useState(false);
-  const [radarOpen, setRadarOpen] = useState(false);
 
   const filtered = recipes.filter(r =>
     search === "" || r.title.toLowerCase().includes(search.toLowerCase())
@@ -1419,7 +1418,6 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
   const handleAddNote = () => {
     if (!noteText.trim()) return;
     const recipe = {
-      id: Date.now(),
       title: noteText.trim(),
       source: "Added manually",
       url: null,
@@ -1427,7 +1425,8 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
       tags: [],
       time: 0,
       ingredients: [],
-      _unsaved: true,
+      inLibrary: false,
+      _needsInsert: true,
     };
     onAdd(recipe);
     onClose();
@@ -1436,7 +1435,6 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
   const handleAddNew = () => {
     if (!newTitle.trim()) return;
     const recipe = {
-      id: Date.now(),
       title: newTitle.trim(),
       source: saveToLibrary ? (newSource.trim() || "Added manually") : "Added manually",
       url: newUrl.trim() || null,
@@ -1450,7 +1448,8 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
       instructions: newInstructions,
       servings: newServings || null,
       rawIngredients: newRawIngredients,
-      _unsaved: !saveToLibrary,
+      inLibrary: saveToLibrary,
+      _needsInsert: true,
     };
     if (saveToLibrary) onAddRecipe(recipe);
     onAdd(recipe);
@@ -1519,24 +1518,6 @@ function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = 
 
           {mode === "new" && (
             <div style={{paddingBottom:8}}>
-              {radar && radar.length > 0 && (
-                <div style={{marginBottom:14}}>
-                  <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:6, cursor:"pointer", userSelect:"none", display:"flex", alignItems:"center", gap:4}} onClick={() => setRadarOpen(o => !o)}>
-                    From radar
-                    <span style={{fontSize:8, transition:"transform 0.2s", display:"inline-block", transform: radarOpen ? "rotate(0deg)" : "rotate(-90deg)"}}>▼</span>
-                  </div>
-                  {radarOpen && radar.map(item => (
-                    <div key={item.id}
-                      onMouseDown={e => { e.preventDefault(); setNewTitle(item.title); setNewUrl(item.url || ""); }}
-                      style={{display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border2)", cursor:"pointer"}}>
-                      <span style={{flex:1, fontSize:12, color: newTitle === item.title ? "var(--accent)" : "var(--ink2)", fontWeight: newTitle === item.title ? 700 : 400, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{item.title}</span>
-                      {item.url && <span style={{fontSize:10, color:"var(--ink4)"}}>↗</span>}
-                    </div>
-                  ))}
-                  {radarOpen && <div style={{height:12}}/>}
-                </div>
-              )}
-              <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:8}}>From web</div>
               <div className="form-field">
                 <label className="form-label">Recipe name</label>
                 <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
@@ -1663,9 +1644,9 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   const fridgeNames   = (fridge  || []).map(i => i.item.toLowerCase());
   const stapleShopItems = staples.filter(s => s.status === "restock").map(s => ({ id: "staple:" + s.name, text: s.name, source: "restock" }));
   const recipeItems = (week || [])
-    .filter(d => d.recipe?.ingredients?.length || d.radarIngredients?.length)
+    .filter(d => d.recipe?.ingredients?.length)
     .flatMap(d => {
-      const ings = d.recipe?.ingredients?.length ? d.recipe.ingredients : (d.radarIngredients || []);
+      const ings = d.recipe.ingredients;
       return ings.map(ing => ({ text: ing, source: d.day, id: d.day + ":" + ing }));
     })
     .filter(item => !okStapleNames.includes(item.text.toLowerCase()) && !freezerNames.includes(item.text.toLowerCase()) && !fridgeNames.includes(item.text.toLowerCase()));
@@ -1722,18 +1703,17 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 // ── Week View ─────────────────────────────────────────────────────────────────
 
 function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
-  batch, prepTasks, prepChecked, onSlot, onSlotRadar, onRemove, onSlotNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onUpdateRadar,
+  batch, prepTasks, prepChecked, onSlot, onRemove, onSlotNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
   onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty }) {
   const [shopOpen, setShopOpen]     = useState(true);
   const [prepOpen, setPrepOpen]     = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [promoteSheet, setPromoteSheet] = useState(null);
   const [newPrepText, setNewPrepText] = useState("");
   const [sheet, setSheet]           = useState(null);
   const [weekDetail, setWeekDetail] = useState(null);
   const [batchDetail, setBatchDetail] = useState(null);
-  const [radarReview, setRadarReview] = useState(null); // { dayIndex, radarItem, scrapedData, loading }
-  const [scrapingDays, setScrapingDays] = useState({}); // dayIndex → true while scraping
 
   // Derived: one prep item per planned recipe that has a prepNote
   const recipePrepItems = week
@@ -1757,65 +1737,6 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
   const handleRemove = (dayIndex) => { onRemove(dayIndex); };
   const handleSlotNote = (dayIndex, note) => { onSlotNote(dayIndex, note); };
   const handleAddRecipe = (recipe) => { onAddRecipe(recipe); };
-
-  const handleSlotRadar = async (dayIndex, radarItem) => {
-    // Optimistic slot with title only
-    onSlotRadar(dayIndex, radarItem, { title: radarItem.title });
-
-    if (radarItem.scrapedAt) {
-      // Already scraped — go straight to review
-      setRadarReview({ dayIndex, radarItem, scrapedData: null });
-    } else if (radarItem.url) {
-      // Scrape first
-      setScrapingDays(s => ({ ...s, [dayIndex]: true }));
-      let scrapedData = null;
-      try {
-        const result = await fetchRecipeData(radarItem.url);
-        scrapedData = {
-          title: result.scrapedData?.title || radarItem.title,
-          cookTime: result.scrapedData?.cookTime || null,
-          ingredients: result.scrapedData?.ingredients || [],
-          instructions: result.scrapedData?.instructions || [],
-          servings: result.scrapedData?.servings || null,
-          thumbnailUrl: result.thumbnailUrl || null,
-        };
-      } catch (e) { console.error('radar scrape failed', e); }
-      setScrapingDays(s => { const n = { ...s }; delete n[dayIndex]; return n; });
-      setRadarReview({ dayIndex, radarItem, scrapedData });
-    } else {
-      // No URL — open review with just the title
-      setRadarReview({ dayIndex, radarItem, scrapedData: null });
-    }
-  };
-
-  const handleRadarReviewConfirm = (confirmed) => {
-    if (!radarReview) return;
-    const { dayIndex, radarItem } = radarReview;
-    // Update the week slot with confirmed data
-    onSlotRadar(dayIndex, radarItem, {
-      title: confirmed.title,
-      cookTime: confirmed.cookTime,
-      thumbnailUrl: confirmed.thumbnailUrl,
-      ingredients: confirmed.ingredients,
-    });
-    // Save scraped data back to radar item
-    onUpdateRadar(radarItem.id, {
-      thumbnailUrl: confirmed.thumbnailUrl,
-      cookTime: confirmed.cookTime,
-      ingredients: confirmed.rawIngredients,
-      instructions: confirmed.instructions,
-      servings: confirmed.servings,
-      scrapedAt: new Date().toISOString(),
-    });
-    setRadarReview(null);
-  };
-
-  const handleRadarReviewCancel = () => {
-    if (radarReview) {
-      onRemove(radarReview.dayIndex);
-    }
-    setRadarReview(null);
-  };
 
   const handleAddBatch = (recipe) => { onAddBatch(recipe); };
 
@@ -1845,7 +1766,15 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
               <span style={{fontSize:11, color:"var(--ink3)"}}>Clear everything?</span>
               <button className="shop-fab" style={{background:"var(--accent)", color:"#fff", borderColor:"var(--accent)", fontSize:11, padding:"6px 12px"}}
                 onClick={() => {
-                  onWeekReset();
+                  const radarInWeek = [...new Map(
+                    week.filter(d => d.recipe && !d.recipe.inLibrary)
+                        .map(d => [d.recipe.id, d.recipe])
+                  ).values()];
+                  if (radarInWeek.length > 0) {
+                    setPromoteSheet(radarInWeek.map(r => ({ recipe: r, checked: true })));
+                  } else {
+                    onWeekReset();
+                  }
                   setConfirmReset(false);
                 }}>Yes</button>
               <button className="shop-fab" style={{fontSize:11, padding:"6px 12px"}}
@@ -1877,11 +1806,8 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
       {(() => {
         if (!fridge) return null;
         const weekIngredients = week
-          .filter(d => d.recipe?.ingredients?.length || d.radarIngredients?.length)
-          .flatMap(d => {
-            const ings = d.recipe?.ingredients?.length ? d.recipe.ingredients : (d.radarIngredients || []);
-            return ings.map(i => i.toLowerCase());
-          });
+          .filter(d => d.recipe?.ingredients?.length)
+          .flatMap(d => d.recipe.ingredients.map(i => i.toLowerCase()));
         const unaccounted = fridge.filter(i =>
           i.s === "soon" &&
           !weekIngredients.includes(i.item.toLowerCase())
@@ -1904,16 +1830,16 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
 
       <div className="week-section">
         <div className="week-row">
-          {row1.map((d, i) => (d.recipe || d.isRadar)
-            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} scraping={scrapingDays[i]} />
+          {row1.map((d, i) => d.recipe
+            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} />
             : d.note
             ? <DayNote key={i} d={d} today={false} onClick={() => openSheet(i)} />
             : <DayStub key={i} d={d} today={false} onClick={() => openSheet(i)} />
           )}
         </div>
         <div className="week-row" style={{marginTop:8}}>
-          {row2.map((d, i) => (d.recipe || d.isRadar)
-            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i + 4)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} scraping={scrapingDays[i + 4]} />
+          {row2.map((d, i) => d.recipe
+            ? <DayCard key={i} d={d} today={false} onClick={() => openSheet(i + 4)} onDetail={r => setWeekDetail(r)} readyBy={goals.readyBy} />
             : d.note
             ? <DayNote key={i} d={d} today={false} onClick={() => openSheet(i + 4)} />
             : <DayStub key={i} d={d} today={false} onClick={() => openSheet(i + 4)} />
@@ -2031,6 +1957,44 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
         />
       )}
 
+      {promoteSheet && (
+        <div className="sheet-overlay" onClick={() => setPromoteSheet(null)}>
+          <div className="sheet" onClick={e => e.stopPropagation()}>
+            <div className="sheet-handle"/>
+            <div className="sheet-header">
+              <div className="sheet-title">Keep these recipes?</div>
+            </div>
+            <p style={{fontSize:13, color:"var(--ink3)", margin:"0 0 12px"}}>
+              These radar items were in this week's plan. Save any to your library?
+            </p>
+            {promoteSheet.map((item, i) => (
+              <label key={item.recipe.id} style={{display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid var(--border)", cursor:"pointer"}}>
+                <input type="checkbox" checked={item.checked} onChange={() => {
+                  setPromoteSheet(ps => ps.map((x, j) => j === i ? { ...x, checked: !x.checked } : x));
+                }} />
+                <span style={{flex:1}}>
+                  <strong>{item.recipe.title}</strong>
+                  {item.recipe.source && <span style={{fontSize:12, color:"var(--ink3)", marginLeft:6}}>{item.recipe.source}</span>}
+                </span>
+              </label>
+            ))}
+            <div style={{display:"flex", gap:8, marginTop:16, justifyContent:"flex-end"}}>
+              <button className="shop-fab" style={{fontSize:12, padding:"8px 14px"}}
+                onClick={() => { onWeekReset(); setPromoteSheet(null); }}>
+                Just clear
+              </button>
+              <button className="shop-fab" style={{background:"var(--accent)", color:"#fff", borderColor:"var(--accent)", fontSize:12, padding:"8px 14px"}}
+                onClick={() => {
+                  promoteSheet.filter(x => x.checked).forEach(x => onPromoteRadar(x.recipe.id));
+                  onWeekReset();
+                  setPromoteSheet(null);
+                }}>
+                Save &amp; clear week
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {weekDetail && (
         <div className="sheet-overlay">
           <div className="detail-overlay-panel" onClick={e => e.stopPropagation()}>
@@ -2078,7 +2042,6 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           radar={radar}
           onClose={closeSheet}
           onSlot={handleSlot}
-          onSlotRadar={handleSlotRadar}
           onRemove={handleRemove}
           onAddRecipe={handleAddRecipe}
           freezer={freezer}
@@ -2091,20 +2054,11 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
       {sheet !== null && sheet.mode === 'batch' && (
         <BatchSheet
           recipes={recipes}
-          radar={radar}
           onClose={closeSheet}
           onAdd={handleAddBatch}
           onAddRecipe={onAddRecipe}
           customTags={customTags}
           customCategories={customCategories}
-        />
-      )}
-      {radarReview && (
-        <RadarReviewSheet
-          radarItem={radarReview.radarItem}
-          scrapedData={radarReview.scrapedData}
-          onConfirm={handleRadarReviewConfirm}
-          onCancel={handleRadarReviewCancel}
         />
       )}
     </div>
@@ -2152,13 +2106,12 @@ function RadarDetailSheet({ item, onClose, onPromote, onPlan }) {
   );
 }
 
-function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, radar, onAddRadar, onRemoveRadar, customTags = [], customCategories = [] }) {
+function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRecipe, radar, onAddRadar, onRemoveRadar, onPromoteRadar, customTags = [], customCategories = [] }) {
   const [filter, setFilter]     = useState("all");
   const [detail, setDetail]     = useState(null);
   const [adding, setAdding]     = useState(false);
   const [radarDetail, setRadarDetail]     = useState(null);
   const [addingRadar, setAddingRadar]     = useState(false);
-  const [promotingRadar, setPromotingRadar] = useState(null); // radar item being promoted
   const [radarTitle, setRadarTitle]   = useState("");
   const [radarUrl, setRadarUrl]       = useState("");
   const [radarSource, setRadarSource] = useState("");
@@ -2166,16 +2119,12 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
   const [radarCollapsed, setRadarCollapsed] = useState(false);
   const toggleSection = key => setCollapsedSections(s => ({...s, [key]: !s[key]}));
   const filters = [{k:"all",l:"All"},{k:"fish",l:"🐟 Fish"},{k:"vegetarian",l:"🌿 Veg"}];
-  const filtered = filter === "all" ? recipes : recipes.filter(r => r.tags?.includes(filter));
+  const filtered = filter === "all" ? library : library.filter(r => r.tags?.includes(filter));
 
   const handleAddRadar = () => {
     if (!radarTitle.trim()) return;
     onAddRadar({ title: radarTitle.trim(), url: radarUrl.trim() || null, source: radarSource.trim() || "" });
     setRadarTitle(""); setRadarUrl(""); setRadarSource(""); setAddingRadar(false);
-  };
-  const handlePromoteRadar = (item) => {
-    setPromotingRadar(item);
-    setRadarDetail(null);
   };
 
   if (detail) return (
@@ -2197,7 +2146,7 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
   return (
     <div className="tab-section">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:16}}>
-        <div><div className="page-title">Recipes</div><div className="page-date">{recipes.length} saved</div></div>
+        <div><div className="page-title">Recipes</div><div className="page-date">{library.length} saved</div></div>
       </div>
 
       {/* On the radar list */}
@@ -2218,7 +2167,7 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
                 ) : (
                   <span className="radar-row-title">{item.title}</span>
                 )}
-                <button className="radar-row-promote" onClick={() => handlePromoteRadar(item)} title="Add to library">+ library</button>
+                <button className="radar-row-promote" onClick={() => onPromoteRadar(item.id)} title="Add to library">+ library</button>
                 <button className="radar-row-remove" onClick={() => onRemoveRadar(item.id)}>×</button>
               </div>
             ))}
@@ -2299,25 +2248,13 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
         <RadarDetailSheet
           item={radarDetail}
           onClose={() => setRadarDetail(null)}
-          onPromote={() => handlePromoteRadar(radarDetail)}
+          onPromote={() => { onPromoteRadar(radarDetail.id); setRadarDetail(null); }}
         />
       )}
       {adding && (
         <AddRecipeSheet
           onClose={() => setAdding(false)}
           onAdd={recipe => onAddRecipe(recipe)}
-          customTags={customTags} customCategories={customCategories}
-        />
-      )}
-      {promotingRadar && (
-        <AddRecipeSheet
-          prefill={{ title: promotingRadar.title, source: promotingRadar.source || "", url: promotingRadar.url || "" }}
-          onClose={() => setPromotingRadar(null)}
-          onAdd={recipe => {
-            onAddRecipe(recipe);
-            onRemoveRadar(promotingRadar.id);
-            setPromotingRadar(null);
-          }}
           customTags={customTags} customCategories={customCategories}
         />
       )}
@@ -2607,7 +2544,6 @@ export default function App() {
   const [freeShop, setFreeShop]       = useState([]);
   const [shopSheetOpen, setShopSheetOpen] = useState(false);
   const [fridge, setFridge] = useState([]);
-  const [radar, setRadar]   = useState([]);
   const [customTags, setCustomTags]             = useState([]);
   const [customCategories, setCustomCategories] = useState([]);
   const [freezer, setFreezer] = useState([]);
@@ -2619,13 +2555,12 @@ export default function App() {
   useEffect(() => {
     async function loadAll() {
       try {
-        const [recipesData, weekData, batchData, radarData, fridgeData, freezerData,
+        const [recipesData, weekData, batchData, fridgeData, freezerData,
                staplesData, regularsData, prefsData, customTagsData, customCatsData,
                shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData] = await Promise.all([
           fetchRecipes(),
           fetchWeekPlan(),
           fetchBatchPrep(),
-          fetchRadar(),
           fetchFridge(),
           fetchFreezer(),
           fetchStaples(),
@@ -2642,7 +2577,6 @@ export default function App() {
         setRecipes(recipesData.map(toAppRecipe));
         setWeek(weekData);
         setBatch(batchData);
-        setRadar(radarData);
         setFridge(fridgeData);
         setFreezer(freezerData);
         setStaples(staplesData);
@@ -2702,27 +2636,45 @@ export default function App() {
     try { await dbDeleteRecipe(id); } catch (e) { console.error(e); }
   };
 
+  // ── Derived: split recipes into library and radar ──
+  const library = recipes.filter(r => r.inLibrary);
+  const radar = recipes.filter(r => !r.inLibrary);
+
   // ── Week handlers ──
-  const CLEAR_RADAR = { isRadar: false, radarTitle: null, radarCookTime: null, radarThumbnailUrl: null, radarIngredients: null };
   const handleSlot = async (dayIndex, recipe) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe, note: null, ...CLEAR_RADAR} : d));
-    if (recipe._unsaved) {
-      // Unsaved recipes don't have a real DB id — store as radar-style entry
-      try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null, radarTitle: recipe.title, cookTime: recipe.time || null, thumbnailUrl: recipe.thumbnailUrl || null, ingredients: recipe.ingredients || null }); } catch (e) { console.error(e); }
+    if (recipe._needsInsert) {
+      // New recipe without a DB id — insert first, then slot
+      try {
+        const saved = await dbAddRecipe(recipe);
+        const appRecipe = toAppRecipe(saved);
+        setRecipes(rs => [...rs, appRecipe]);
+        setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: appRecipe, note: null} : d));
+        await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: appRecipe.id, note: null });
+      } catch (e) { console.error(e); }
     } else {
-      try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: recipe.id, note: null, radarTitle: null, cookTime: null, thumbnailUrl: null, ingredients: null }); } catch (e) { console.error(e); }
+      setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe, note: null} : d));
+      try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: recipe.id, note: null }); } catch (e) { console.error(e); }
     }
   };
+  // Keep week in sync when recipes state updates (e.g. after background scrape)
+  useEffect(() => {
+    setWeek(w => w.map(d => {
+      if (!d.recipe) return d;
+      const latest = recipes.find(r => r.id === d.recipe.id);
+      if (latest && latest !== d.recipe) return { ...d, recipe: latest };
+      return d;
+    }));
+  }, [recipes]);
   const handleRemove = async (dayIndex) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: null, note: null, ...CLEAR_RADAR} : d));
-    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null, radarTitle: null, cookTime: null, thumbnailUrl: null, ingredients: null }); } catch (e) { console.error(e); }
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, recipe: null, note: null} : d));
+    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: null }); } catch (e) { console.error(e); }
   };
   const handleSlotNote = async (dayIndex, note) => {
-    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, note: note.trim() || null, recipe: null, ...CLEAR_RADAR} : d));
-    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: note.trim() || null, radarTitle: null, cookTime: null, thumbnailUrl: null, ingredients: null }); } catch (e) { console.error(e); }
+    setWeek(w => w.map((d, i) => i === dayIndex ? {...d, note: note.trim() || null, recipe: null} : d));
+    try { await upsertWeekDay(THIS_WEEK, dayIndex, { recipeId: null, note: note.trim() || null }); } catch (e) { console.error(e); }
   };
   const handleWeekReset = async () => {
-    setWeek(DAY_NAMES.map(day => ({ day, recipe: null, note: null, ...CLEAR_RADAR })));
+    setWeek(DAY_NAMES.map(day => ({ day, recipe: null, note: null })));
     setBatch([]);
     setRegChecked({});
     try { await clearWeekPlan(THIS_WEEK); await clearBatchPrep(THIS_WEEK); } catch (e) { console.error(e); }
@@ -2730,52 +2682,61 @@ export default function App() {
 
   // ── Batch handlers ──
   const handleAddBatch = async (recipe) => {
-    setBatch(b => [...b, recipe]);
-    try { await addBatchItem(THIS_WEEK, recipe.id); } catch (e) { console.error(e); }
+    if (recipe._needsInsert) {
+      try {
+        const saved = await dbAddRecipe(recipe);
+        const appRecipe = toAppRecipe(saved);
+        setRecipes(rs => [...rs, appRecipe]);
+        setBatch(b => [...b, appRecipe]);
+        await addBatchItem(THIS_WEEK, appRecipe.id);
+      } catch (e) { console.error(e); }
+    } else {
+      setBatch(b => [...b, recipe]);
+      try { await addBatchItem(THIS_WEEK, recipe.id); } catch (e) { console.error(e); }
+    }
   };
   const handleRemoveBatch = async (recipeId) => {
     setBatch(b => b.filter(r => r.id !== recipeId));
     try { await removeBatchItem(THIS_WEEK, recipeId); } catch (e) { console.error(e); }
   };
 
-  // ── Radar handlers ──
+  // ── Radar handlers (backed by recipes table with inLibrary=false) ──
   const handleAddRadar = async (item) => {
     try {
       const saved = await dbAddRadarItem(item);
-      setRadar(r => [saved, ...r]);
+      setRecipes(rs => [saved, ...rs]);
+      // Background scrape if URL provided
+      if (saved.url) {
+        fetchRecipeData(saved.url).then(({ thumbnailUrl, scrapedData }) => {
+          if (!thumbnailUrl && !scrapedData) return;
+          const updates = { ...saved };
+          if (thumbnailUrl) updates.thumbnailUrl = thumbnailUrl;
+          if (scrapedData) {
+            if (scrapedData.title) updates.title = scrapedData.title;
+            if (scrapedData.cookTime) updates.time = scrapedData.cookTime;
+            if (scrapedData.ingredients?.length) {
+              updates.ingredients = scrapedData.ingredients;
+              updates.rawIngredients = scrapedData.ingredients;
+            }
+            if (scrapedData.instructions?.length) updates.instructions = scrapedData.instructions;
+            if (scrapedData.description) updates.description = scrapedData.description;
+            if (scrapedData.servings) updates.servings = scrapedData.servings;
+          }
+          setRecipes(rs => rs.map(r => r.id === saved.id ? updates : r));
+          // Also update any week slots referencing this recipe
+          setWeek(w => w.map(d => d.recipe?.id === saved.id ? { ...d, recipe: updates } : d));
+          dbUpdateRecipe(saved.id, updates);
+        }).catch(e => console.error('radar scrape failed', e));
+      }
     } catch (e) { console.error(e); }
   };
   const handleRemoveRadar = async (id) => {
-    setRadar(r => r.filter(x => x.id !== id));
-    try { await dbRemoveRadarItem(id); } catch (e) { console.error(e); }
+    setRecipes(rs => rs.filter(r => r.id !== id));
+    try { await dbDeleteRecipe(id); } catch (e) { console.error(e); }
   };
-  const handleSlotRadar = async (dayIndex, radarItem, confirmed) => {
-    // Update week state with radar data
-    setWeek(w => w.map((d, i) => i === dayIndex ? {
-      ...d,
-      recipe: null,
-      note: null,
-      isRadar: true,
-      radarTitle: confirmed.title || radarItem.title,
-      radarCookTime: confirmed.cookTime || radarItem.cookTime || null,
-      radarThumbnailUrl: confirmed.thumbnailUrl || radarItem.thumbnailUrl || null,
-      radarIngredients: confirmed.ingredients || null,
-    } : d));
-    // Persist to week_plan (no recipe_id, store data directly)
-    try {
-      await upsertWeekDay(THIS_WEEK, dayIndex, {
-        recipeId: null,
-        note: null,
-        radarTitle: confirmed.title || radarItem.title,
-        cookTime: confirmed.cookTime || radarItem.cookTime || null,
-        thumbnailUrl: confirmed.thumbnailUrl || radarItem.thumbnailUrl || null,
-        ingredients: confirmed.ingredients || null,
-      });
-    } catch (e) { console.error(e); }
-  };
-  const handleUpdateRadar = async (id, fields) => {
-    setRadar(r => r.map(item => item.id === id ? { ...item, ...fields } : item));
-    try { await dbUpdateRadarItem(id, fields); } catch (e) { console.error(e); }
+  const handlePromoteRadar = async (id) => {
+    setRecipes(rs => rs.map(r => r.id === id ? { ...r, inLibrary: true } : r));
+    try { await dbPromoteToLibrary(id); } catch (e) { console.error(e); }
   };
 
   // ── Prefs handler ──
@@ -2956,14 +2917,14 @@ export default function App() {
   const totalUnchecked = regsLeft + [...new Set(recipeIngCount)].filter(i => !shopChecked["Mon:"+i] && !shopChecked["Tue:"+i]).length + stapleNeedCount + freeShop.filter(f => !f.done).length;
 
   const views = {
-    week:    <WeekView goals={goals} week={week} recipes={recipes} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} staples={staples} regulars={regulars} regChecked={regChecked} shopChecked={shopChecked} freeShop={freeShop} radar={radar} customTags={customTags} customCategories={customCategories}
+    week:    <WeekView goals={goals} week={week} recipes={library} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} staples={staples} regulars={regulars} regChecked={regChecked} shopChecked={shopChecked} freeShop={freeShop} radar={radar} customTags={customTags} customCategories={customCategories}
       batch={batch} prepTasks={prepTasks} prepChecked={prepChecked}
-      onSlot={handleSlot} onSlotRadar={handleSlotRadar} onRemove={handleRemove} onSlotNote={handleSlotNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onUpdateRadar={handleUpdateRadar}
+      onSlot={handleSlot} onRemove={handleRemove} onSlotNote={handleSlotNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
       onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop}
       onAdjustFreezerQty={handleAdjustFreezerQty} />,
-    recipes: <RecipesView recipes={recipes} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} customTags={customTags} customCategories={customCategories} />,
+    recipes: <RecipesView recipes={recipes} library={library} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} radar={radar} onAddRadar={handleAddRadar} onRemoveRadar={handleRemoveRadar} onPromoteRadar={handlePromoteRadar} customTags={customTags} customCategories={customCategories} />,
     pantry:  <InventoryView week={week} recipes={recipes} staples={staples} onAddStaple={handleAddStaple} onCycleStaple={handleCycleStaple} onRemoveStaple={handleRemoveStaple} regulars={regulars} onAddRegular={handleAddRegular} onRemoveRegular={handleRemoveRegular} fridge={fridge} onAddFridge={handleAddFridge} onCycleFridge={handleCycleFridge} onRemoveFridge={handleRemoveFridge} freezer={freezer} onAddFreezer={handleAddFreezer} onAdjustFreezerQty={handleAdjustFreezerQty} onRemoveFreezer={handleRemoveFreezer} />,
     prefs:   <PrefsView goals={goals} updateGoal={updateGoal} customTags={customTags} onAddCustomTag={handleAddCustomTag} onRemoveCustomTag={handleRemoveCustomTag} customCategories={customCategories} onAddCustomCategory={handleAddCustomCategory} onRemoveCustomCategory={handleRemoveCustomCategory} recipes={recipes} setRecipes={setRecipes} />,
   };
