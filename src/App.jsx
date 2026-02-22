@@ -2931,37 +2931,48 @@ export default function App() {
     setShopFilters(shopFiltersData);
   };
 
+  const setupRealtimeSubscriptions = () => {
+    supabase
+      .channel('week_plan_items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'week_plan_items' }, () => {
+        fetchWeekPlanItems(THIS_WEEK).then(setWeek);
+      })
+      .subscribe();
+    supabase
+      .channel('batch_prep')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'batch_prep' }, () => {
+        fetchBatchPrep().then(setBatch);
+      })
+      .subscribe();
+    supabase
+      .channel('shop_checked')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shop_checked' }, () => {
+        fetchShopChecked().then(setShopChecked);
+      })
+      .subscribe();
+  };
+
   useEffect(() => {
     async function loadAll() {
       try { await loadAllData(); } catch (e) { console.error('loadAll failed', e); }
       setLoading(false);
     }
     loadAll();
+    setupRealtimeSubscriptions();
+    return () => supabase.removeAllChannels();
+  }, []);
 
-    // Realtime — sync week plan, batch, and shopping across devices
-    const weekSub = supabase
-      .channel('week_plan_items')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'week_plan_items' }, () => {
-        fetchWeekPlanItems(THIS_WEEK).then(setWeek);
-      })
-      .subscribe();
-    const batchSub = supabase
-      .channel('batch_prep')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'batch_prep' }, () => {
-        fetchBatchPrep().then(setBatch);
-      })
-      .subscribe();
-    const shopSub = supabase
-      .channel('shop_checked')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shop_checked' }, () => {
-        fetchShopChecked().then(setShopChecked);
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(weekSub);
-      supabase.removeChannel(batchSub);
-      supabase.removeChannel(shopSub);
+  // Re-fetch data and re-establish realtime when app returns from background
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        try { await loadAllData(); } catch (e) { console.error('visibility refresh failed', e); }
+        supabase.removeAllChannels();
+        setupRealtimeSubscriptions();
+      }
     };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   // ── Recipe handlers ──
