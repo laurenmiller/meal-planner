@@ -419,9 +419,11 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
   description, setDescription, servings, setServings,
   instructions, setInstructions,
   rawIngredients, setRawIngredients,
+  pdfUrl, setPdfUrl, recipeId,
   setFetchLoading: setFetchLoadingProp }) {
 
   const [fetchLoading, setFetchLoadingLocal] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const setFetchLoading = v => { setFetchLoadingLocal(v); if (setFetchLoadingProp) setFetchLoadingProp(v); };
   const [scraped, setScraped] = useState(false);
   const handleUrlBlur = async () => {
@@ -535,6 +537,33 @@ function RecipeFormFields({ title, setTitle, source, setSource, url, setUrl,
         </div>
         <div className="ingredient-tag-hint">Enter or comma to add · skip staples like garlic, olive oil</div>
       </div>
+      {setPdfUrl && recipeId && (
+        <div className="form-field">
+          <label className="form-label">Attachment <span style={{fontWeight:400,color:"var(--ink4)"}}>PDF or image</span></label>
+          {pdfUrl && (
+            <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:6}}>
+              {/\.(jpe?g|png|gif|webp)(\?|$)/i.test(pdfUrl)
+                ? <img src={pdfUrl} alt="" style={{width:48, height:48, borderRadius:6, objectFit:"cover"}}/>
+                : <span style={{fontSize:13, color:"var(--ink3)"}}>📄 PDF attached</span>}
+              <button type="button" style={{fontSize:11, color:"var(--ink4)", background:"none", border:"1px solid var(--border)", borderRadius:6, padding:"3px 8px", cursor:"pointer"}}
+                onClick={async () => { await removeRecipeFile(recipeId, pdfUrl); setPdfUrl(""); }}>Remove</button>
+            </div>
+          )}
+          <label className="detail-upload-btn">
+            {uploading ? "Uploading…" : (pdfUrl ? "Replace file" : "Upload file")}
+            <input type="file" accept="image/*,.pdf" style={{display:"none"}}
+              disabled={uploading}
+              onChange={async e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setUploading(true);
+                try { setPdfUrl(await uploadRecipeFile(recipeId, file)); } catch (err) { console.error(err); }
+                setUploading(false);
+                e.target.value = "";
+              }}/>
+          </label>
+        </div>
+      )}
     </div>
   );
 }
@@ -555,12 +584,14 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
   const [servings, setServings] = useState(prefill.servings || null);
   const [instructions, setInstructions] = useState(prefill.instructions || []);
   const [rawIngredients, setRawIngredients] = useState(prefill.rawIngredients || []);
+  const [pdfUrl, setPdfUrl] = useState(prefill.pdfUrl || "");
   const [fetchLoading, setFetchLoading] = useState(false);
+  const [recipeId] = useState(() => Date.now());
 
   const handleSave = () => {
     if (!title.trim()) return;
     onAdd({
-      id: Date.now(),
+      id: recipeId,
       title: title.trim(),
       source: source.trim() || "Added manually",
       url: url.trim() || null,
@@ -573,6 +604,7 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
       instructions,
       servings: servings || null,
       rawIngredients,
+      pdfUrl: pdfUrl || undefined,
     });
     onClose();
   };
@@ -601,6 +633,7 @@ function AddRecipeSheet({ onClose, onAdd, prefill = {}, customTags = [], customC
             servings={servings} setServings={setServings}
             instructions={instructions} setInstructions={setInstructions}
             rawIngredients={rawIngredients} setRawIngredients={setRawIngredients}
+            pdfUrl={pdfUrl} setPdfUrl={setPdfUrl} recipeId={recipeId}
             setFetchLoading={setFetchLoading}
           />
         </div>
@@ -1685,7 +1718,6 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
     <div className="tab-section">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:16}}>
         <div><div className="page-title">Recipes</div><div className="page-date">{recipes.length} saved</div></div>
-        <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add</button>
       </div>
 
       {/* On the radar list */}
@@ -1732,8 +1764,11 @@ function RecipesView({ recipes, onAddRecipe, onUpdateRecipe, onDeleteRecipe, rad
 
       <div className="recipe-library-header">
         <div className="recipe-library-title">Recipe <em>Library</em></div>
-        <div className="filter-row" style={{margin:0, flex:"none"}}>
-          {filters.map(f => <button key={f.k} className={"fpill"+(filter===f.k?" active":"")} onClick={() => setFilter(f.k)}>{f.l}</button>)}
+        <div style={{display:"flex", alignItems:"center", gap:8}}>
+          <div className="filter-row" style={{margin:0, flex:"none"}}>
+            {filters.map(f => <button key={f.k} className={"fpill"+(filter===f.k?" active":"")} onClick={() => setFilter(f.k)}>{f.l}</button>)}
+          </div>
+          <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add</button>
         </div>
       </div>
       {(() => {

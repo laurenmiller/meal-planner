@@ -623,7 +623,6 @@ export async function fetchRecipeData(url) {
       body: { url },
     })
     if (error) { console.error('fetchRecipeData error:', error); return { thumbnailUrl: null, scrapedData: null } }
-    console.log('fetchRecipeData raw:', typeof data, data)
     return { thumbnailUrl: data?.thumbnailUrl || null, scrapedData: data?.scrapedData || null }
   } catch (e) {
     console.error('fetchRecipeData', e)
