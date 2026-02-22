@@ -1012,7 +1012,11 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
   const [noteText, setNoteText] = useState("");
   // deductPrompt: { recipe, matches: [{freezerItem, qty}] }
 
-  const filtered = recipes.filter(r =>
+  const dinnerRecipes = recipes.filter(r =>
+    (r.category === "dinner" || !r.category) &&
+    (search === "" || r.title.toLowerCase().includes(search.toLowerCase()))
+  );
+  const dinnerRadar = (radar || []).filter(r =>
     (r.category === "dinner" || !r.category) &&
     (search === "" || r.title.toLowerCase().includes(search.toLowerCase()))
   );
@@ -1120,9 +1124,6 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
     }));
   };
 
-  const dayLabel = targetDay
-    ? `${targetDay.day}day`
-    : "Choose a night";
 
   if (deductPrompt) return (
     <div className="sheet-overlay" onClick={skipDeduct}>
@@ -1162,17 +1163,13 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
         <div className="sheet-handle"/>
         <div className="sheet-header">
           <div className="sheet-title">
-            {targetDay?.items?.length > 0 ? <>Add to <em>{targetDay.day}</em>'s dinner</> : <>Plan <em>{targetDay?.day ?? "a night"}</em></>}
+            {targetDay?.items?.length > 0 ? <>Add to <em>{targetDay.day}</em></> : <>Plan <em>{targetDay?.day ?? "a night"}</em></>}
           </div>
-          <div className="sheet-subtitle">{dayLabel}</div>
         </div>
 
         <div className="sheet-mode-toggle">
           <button className={"sheet-mode-btn" + (mode==="pick" ? " active" : "")} onClick={() => setMode("pick")}>
-            From Library
-          </button>
-          <button className={"sheet-mode-btn" + (mode==="radar" ? " active" : "")} onClick={() => setMode("radar")}>
-            Try Soon
+            Recipes
           </button>
           <button className={"sheet-mode-btn" + (mode==="url" ? " active" : "")} onClick={() => setMode("url")}>
             Add URL
@@ -1186,59 +1183,39 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
           {mode === "pick" && (<>
             <input
               className="pick-search"
-              placeholder="Search recipes…"
+              placeholder="Search dinner recipes…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               autoFocus
             />
 
-            {filtered.map(r => (
+            {dinnerRadar.map(item => (
+              <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => handleSlot(item)}>
+                <div className="pick-thumb pick-thumb-radar">✦</div>
+                <div style={{flex:1, minWidth:0}}>
+                  <div className="pick-recipe-title">{item.title}</div>
+                  <div className="pick-recipe-meta"><span className="pick-badge-radar">try soon</span>{item.source ? ` · ${item.source}` : ""}</div>
+                </div>
+                <span style={{color:"var(--ink4)", fontSize:18}}>›</span>
+              </div>
+            ))}
+
+            {dinnerRecipes.map(r => (
               <div key={r.id} className="pick-recipe-item" onClick={() => handleSlot(r)}>
                 <div className="pick-thumb">{r.title[0]}</div>
                 <div style={{flex:1, minWidth:0}}>
                   <div className="pick-recipe-title">{r.title}</div>
                   <div className="pick-recipe-meta">{r.source} · {r.time} min</div>
-                  <div className="pick-tags"><Tags tags={r.tags}/></div>
                 </div>
-                <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
+                <span style={{color:"var(--ink4)", fontSize:18}}>›</span>
               </div>
             ))}
 
-            {filtered.length === 0 && (
-              <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic"}}>
-                No recipes match "{search}"
+            {dinnerRecipes.length === 0 && dinnerRadar.length === 0 && (
+              <div style={{padding:"16px 0", textAlign:"center", color:"var(--ink4)", fontSize:12, fontStyle:"italic"}}>
+                No dinner recipes match "{search}"
               </div>
             )}
-          </>)}
-
-          {mode === "radar" && (<>
-            <input
-              className="pick-search"
-              placeholder="Search try soon…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              autoFocus
-            />
-            {(() => {
-              const filteredRadar = (radar || []).filter(item =>
-                search === "" || item.title.toLowerCase().includes(search.toLowerCase())
-              );
-              if (!filteredRadar.length) return (
-                <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic"}}>
-                  {radar?.length ? `No items match "${search}"` : "Nothing on your Try Soon list yet"}
-                </div>
-              );
-              return filteredRadar.map(item => (
-                <div key={"radar-"+item.id} className="pick-recipe-item" onClick={() => handleSlot(item)}>
-                  <div className="pick-thumb" style={{background:"var(--accent-pale)", color:"var(--accent)"}}>✦</div>
-                  <div style={{flex:1, minWidth:0}}>
-                    <div className="pick-recipe-title">{item.title}</div>
-                    <div className="pick-recipe-meta">{item.source || "Try Soon"}{item.time ? ` · ${item.time} min` : ""}</div>
-                  </div>
-                  <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
-                </div>
-              ));
-            })()}
           </>)}
 
           {mode === "note" && (

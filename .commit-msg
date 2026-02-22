@@ -1,1 +1,1 @@
-Move shopping list to its own tab; remove from week view and FAB overlay; add ShopView wrapper component
+Tighten PlanSheet: merge Library and Try Soon into single Recipes tab filtered to dinner only; compact row sizing, smaller thumbs, remove redundant subtitle
