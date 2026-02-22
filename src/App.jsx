@@ -2361,8 +2361,8 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
   const [radarUrl, setRadarUrl]       = useState("");
   const [radarSource, setRadarSource] = useState("");
   const [radarFetching, setRadarFetching] = useState(false);
+  const [radarCategory, setRadarCategory] = useState("dinner");
   const [collapsedSections, setCollapsedSections] = useState({});
-  const [radarCollapsed, setRadarCollapsed] = useState(false);
   const toggleSection = key => setCollapsedSections(s => ({...s, [key]: !s[key]}));
   const filters = [{k:"all",l:"All"},{k:"fish",l:"🐟 Fish"},{k:"vegetarian",l:"🌿 Veg"}];
   const filtered = filter === "all" ? library : library.filter(r => r.tags?.includes(filter));
@@ -2382,8 +2382,8 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
   const handleAddRadar = () => {
     if (!radarTitle.trim() && !radarUrl.trim()) return;
     const fallbackTitle = radarTitle.trim() || (() => { try { return new URL(radarUrl.trim()).hostname.replace(/^www\./, ''); } catch { return radarUrl.trim(); } })();
-    onAddRadar({ title: fallbackTitle, url: radarUrl.trim() || null, source: radarSource.trim() || "" });
-    setRadarTitle(""); setRadarUrl(""); setRadarSource(""); setAddingRadar(false);
+    onAddRadar({ title: fallbackTitle, url: radarUrl.trim() || null, source: radarSource.trim() || "", category: radarCategory });
+    setRadarTitle(""); setRadarUrl(""); setRadarSource(""); setRadarCategory("dinner"); setAddingRadar(false);
   };
 
   if (detail) return (
@@ -2409,35 +2409,19 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
         <div><div className="page-title">Recipes</div><div className="page-date">{library.length} saved</div></div>
       </div>
 
-      {/* On the radar list */}
-      <div className="radar-shelf">
-        <div className="recipe-library-header" style={{marginTop:0, paddingTop:0, borderTop:"none", marginBottom: radarCollapsed ? 0 : 6, cursor:"pointer", userSelect:"none"}} onClick={() => setRadarCollapsed(c => !c)}>
-          <div className="recipe-library-title">
-            Try <em>Soon</em>
-            <span style={{fontFamily:"'Lato',sans-serif", fontSize:10, color:"var(--ink4)", fontStyle:"normal", marginLeft:6, transition:"transform 0.2s", display:"inline-block", transform: radarCollapsed ? "rotate(-90deg)" : "rotate(0deg)"}}>▼</span>
+      <div className="recipe-library-header" style={{marginTop:0, paddingTop:0, borderTop:"none"}}>
+        <div className="recipe-library-title">Recipe <em>Library</em></div>
+        <div style={{display:"flex", alignItems:"center", gap:8}}>
+          <div className="filter-row" style={{margin:0, flex:"none"}}>
+            {filters.map(f => <button key={f.k} className={"fpill"+(filter===f.k?" active":"")} onClick={() => setFilter(f.k)}>{f.l}</button>)}
           </div>
-          {!addingRadar && !radarCollapsed && <button style={{fontSize:11, color:"var(--ink4)", background:"none", border:"none", cursor:"pointer", padding:0, fontFamily:"inherit"}} onClick={e => { e.stopPropagation(); setAddingRadar(true); }}>+ Add</button>}
+          <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add</button>
+          <button style={{fontSize:11, color:"var(--sage)", background:"none", border:"1px solid var(--sage-light)", borderRadius:16, padding:"6px 12px", cursor:"pointer", fontFamily:"inherit", fontWeight:700, whiteSpace:"nowrap"}} onClick={() => setAddingRadar(true)}>+ Try Soon</button>
         </div>
-        {!radarCollapsed && radar.length > 0 && (
-          <div className="radar-list">
-            {radar.map(item => (
-              <div key={item.id} className="radar-row">
-                {item.url ? (
-                  <a className="radar-row-title linked" href={item.url} target="_blank" rel="noopener noreferrer">{item.title}</a>
-                ) : (
-                  <span className="radar-row-title">{item.title}</span>
-                )}
-                <button className="radar-row-promote" onClick={() => onPromoteRadar(item.id)} title="Add to library">+ library</button>
-                <button className="radar-row-remove" onClick={() => onRemoveRadar(item.id)}>×</button>
-              </div>
-            ))}
-          </div>
-        )}
-        {!radarCollapsed && radar.length === 0 && !addingRadar && (
-          <div style={{fontSize:12, color:"var(--ink4)", fontStyle:"italic"}}>Nothing yet — add recipes you want to try.</div>
-        )}
-        {!radarCollapsed && addingRadar && (
-          <div style={{marginTop:8, display:"flex", gap:6, alignItems:"center", flexWrap:"wrap"}}>
+      </div>
+      {addingRadar && (
+        <div style={{padding:"0 18px 12px", display:"flex", flexDirection:"column", gap:6}}>
+          <div style={{display:"flex", gap:6, alignItems:"center", flexWrap:"wrap"}}>
             <input className="pantry-add-input" placeholder="Recipe name" value={radarTitle} autoFocus style={{flex:"2 1 140px"}}
               onChange={e => setRadarTitle(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleAddRadar()}/>
@@ -2445,23 +2429,20 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
               onChange={e => setRadarUrl(e.target.value)}
               onBlur={handleRadarUrlBlur}
               onKeyDown={e => e.key === "Enter" && handleAddRadar()}/>
+          </div>
+          <div style={{display:"flex", gap:6, alignItems:"center", flexWrap:"wrap"}}>
+            <div className="cat-select">
+              {[{k:"dinner",l:"Dinner"},{k:"breakfast",l:"Breakfast"},{k:"sweets",l:"Sweets"},...customCategories.map(c=>({k:c,l:c}))].map(c => (
+                <button key={c.k} className={"cat-btn" + (radarCategory === c.k ? " active" : "")} style={{fontSize:11, padding:"4px 10px"}}
+                  onClick={() => setRadarCategory(c.k)}>{c.l}</button>
+              ))}
+            </div>
             {radarFetching && <span style={{fontSize:11, color:"var(--ink4)", flexShrink:0}}>fetching…</span>}
             <button className="pantry-add-btn" disabled={(!radarTitle.trim() && !radarUrl.trim()) || radarFetching} onClick={handleAddRadar}>Add</button>
-            <button className="sheet-btn sheet-btn-cancel" style={{padding:"6px 10px", fontSize:12}} onClick={() => { setAddingRadar(false); setRadarTitle(""); setRadarUrl(""); setRadarSource(""); }}>Cancel</button>
+            <button className="sheet-btn sheet-btn-cancel" style={{padding:"6px 10px", fontSize:12}} onClick={() => { setAddingRadar(false); setRadarTitle(""); setRadarUrl(""); setRadarSource(""); setRadarCategory("dinner"); }}>Cancel</button>
           </div>
-        )}
-      </div>
-
-
-      <div className="recipe-library-header">
-        <div className="recipe-library-title">Recipe <em>Library</em></div>
-        <div style={{display:"flex", alignItems:"center", gap:8}}>
-          <div className="filter-row" style={{margin:0, flex:"none"}}>
-            {filters.map(f => <button key={f.k} className={"fpill"+(filter===f.k?" active":"")} onClick={() => setFilter(f.k)}>{f.l}</button>)}
-          </div>
-          <button className="btn btn-primary" onClick={() => setAdding(true)}>+ Add</button>
         </div>
-      </div>
+      )}
       {(() => {
         const SECTIONS = [
           { key: "dinner",    label: "Dinner" },

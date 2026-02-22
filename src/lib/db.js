@@ -313,6 +313,7 @@ export async function addRadarItem(item) {
       title: item.title,
       url: item.url || null,
       source: item.source || "",
+      category: item.category || "dinner",
       in_library: false,
     })
     .select()
