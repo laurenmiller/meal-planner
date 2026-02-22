@@ -3,7 +3,7 @@ import './styles.css';
 import { supabase } from './lib/supabase.js';
 import {
   fetchRecipes, addRecipe as dbAddRecipe, updateRecipe as dbUpdateRecipe, deleteRecipe as dbDeleteRecipe, toAppRecipe,
-  fetchWeekPlanItems, addWeekPlanItem, removeWeekPlanItem, clearWeekPlanItems, clearDayItems, migrateWeekPlanToItems,
+  fetchWeekPlanItems, addWeekPlanItem, removeWeekPlanItem, moveWeekPlanItem, clearWeekPlanItems, clearDayItems, migrateWeekPlanToItems,
   fetchBatchPrep, addBatchItem, removeBatchItem, clearBatchPrep,
   addRadarItem as dbAddRadarItem, promoteToLibrary as dbPromoteToLibrary,
   fetchFridge, addFridgeItem as dbAddFridgeItem, updateFridgeItem as dbUpdateFridgeItem, removeFridgeItem as dbRemoveFridgeItem,
@@ -92,7 +92,7 @@ function Tags({ tags }) {
 
 // ── Recipe Detail Sheet ───────────────────────────────────────────────────────
 
-function RecipeDetailView({ recipe, onClose, onSave, onDelete, customTags = [], customCategories = [] }) {
+function RecipeDetailView({ recipe, onClose, onSave, onDelete, onRemoveFromPlan, source = "library", itemId, customTags = [], customCategories = [] }) {
   const [editing, setEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [liveRecipe, setLiveRecipe] = useState(recipe);
@@ -288,7 +288,10 @@ function RecipeDetailView({ recipe, onClose, onSave, onDelete, customTags = [], 
         <div className="detail-footer">
           <button className="sheet-btn sheet-btn-primary" style={{flex:1}} onClick={startEdit}>Edit</button>
           {r.url && <button className="sheet-btn sheet-btn-cancel" disabled={refreshing} onClick={handleRefresh}>{refreshing ? "Refreshing…" : "↻ Refresh"}</button>}
-          <button className="detail-delete-btn" onClick={() => { onDelete(r.id); onClose(); }}>Delete</button>
+          {source === "plan"
+            ? <button className="detail-delete-btn" onClick={() => onRemoveFromPlan()}>Remove from plan</button>
+            : <button className="detail-delete-btn" onClick={() => { onDelete(r.id); onClose(); }}>Delete</button>
+          }
         </div>
       </>)}
 
@@ -725,8 +728,9 @@ function ShoppingSheet({ onClose, week, staples, freezer, fridge, regulars, onAd
   });
   const allDeduped = [...stapleShopItems, ...deduped, ...freeShop.map(f => ({ ...f, source: null }))];
 
-  // Split staple-filtered vs main — pantry staple names auto-included + user extras from shopFilters
-  const allFilterNames = [...new Set([...staples.map(s => s.name.toLowerCase()), ...shopFilters])];
+  // Split staple-filtered vs main — only stocked staple names filter, not restock ones
+  const stockedStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
+  const allFilterNames = [...new Set([...stockedStapleNames, ...shopFilters])];
   const isFiltered = (text) => allFilterNames.some(s => normalizeIngredient(text).toLowerCase().includes(s));
   const mainItems = allDeduped.filter(item => !isFiltered(item.text) || unfilteredIds.has(item.id));
   const filteredItems = allDeduped.filter(item => isFiltered(item.text) && !unfilteredIds.has(item.id));
@@ -1362,12 +1366,44 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
 
 // ── Day Card & Stub ───────────────────────────────────────────────────────────
 
-function ItemCard({ item, isToday, isPrimary, readyBy, onDetail, onRemove }) {
+function ItemCard({ item, isToday, isPrimary, readyBy, onDetail, onRemove, isDragging, onDragStart, onDragEnd, onTouchDragStart }) {
   const [swiped, setSwiped] = useState(false);
   const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
+  const longPressTimer = useRef(null);
+  const isDragMode = useRef(false);
 
-  const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    isDragMode.current = false;
+    // Start long-press timer for drag initiation
+    longPressTimer.current = setTimeout(() => {
+      isDragMode.current = true;
+      if (onTouchDragStart) onTouchDragStart(item);
+    }, 500);
+  };
+  const handleTouchMove = (e) => {
+    if (isDragMode.current) return; // Already in drag mode, handled by WeekView
+    // Cancel long-press if finger moves too much
+    if (longPressTimer.current && touchStartX.current !== null) {
+      const dx = Math.abs(e.touches[0].clientX - touchStartX.current);
+      const dy = Math.abs(e.touches[0].clientY - touchStartY.current);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    }
+  };
   const handleTouchEnd = (e) => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (isDragMode.current) {
+      isDragMode.current = false;
+      return; // Drop handled by WeekView
+    }
     if (touchStartX.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     touchStartX.current = null;
@@ -1375,12 +1411,21 @@ function ItemCard({ item, isToday, isPrimary, readyBy, onDetail, onRemove }) {
     else if (dx > 30) setSwiped(false);
   };
 
+  const cardDragProps = {
+    draggable: true,
+    onDragStart: (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      if (onDragStart) onDragStart();
+    },
+    onDragEnd: () => { if (onDragEnd) onDragEnd(); },
+  };
+
   // Note card
   if (item.itemType === 'note') {
     return (
-      <div className={"item-card item-card-note" + (isToday ? " today" : "") + (swiped ? " swiped" : "")}
-        onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-        <div className="item-card-inner" onClick={() => {}}>
+      <div className={"item-card item-card-note" + (isToday ? " today" : "") + (swiped ? " swiped" : "") + (isDragging ? " dragging" : "")}
+        onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+        <div className="item-card-inner" {...cardDragProps} onClick={() => {}}>
           <div className="item-note-text">{item.note}</div>
         </div>
         <button className="item-card-remove-hover" onClick={e => { e.stopPropagation(); onRemove(); }}>×</button>
@@ -1399,9 +1444,9 @@ function ItemCard({ item, isToday, isPrimary, readyBy, onDetail, onRemove }) {
   const start = isPrimary ? calcStart(readyBy, time) : null;
 
   return (
-    <div className={"item-card" + (isRadar ? " item-card-radar" : "") + (isToday ? " today" : "") + (swiped ? " swiped" : "")}
-      onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-      <div className="item-card-inner" onClick={() => onDetail(r)}>
+    <div className={"item-card" + (isRadar ? " item-card-radar" : "") + (isToday ? " today" : "") + (swiped ? " swiped" : "") + (isDragging ? " dragging" : "")}
+      onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+      <div className="item-card-inner" {...cardDragProps} onClick={() => onDetail(r)}>
         {thumb ? (
           <img className="item-card-thumb" src={thumb} alt="" />
         ) : (
@@ -1705,8 +1750,9 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
   });
   const allDeduped = [...stapleShopItems, ...deduped, ...freeShop];
 
-  // Split staple-filtered vs main — pantry staple names auto-included + user extras from shopFilters
-  const allFilterNames = [...new Set([...staples.map(s => s.name.toLowerCase()), ...shopFilters])];
+  // Split staple-filtered vs main — only stocked staple names filter, not restock ones
+  const stockedStapleNames = staples.filter(s => s.status === "ok").map(s => s.name.toLowerCase());
+  const allFilterNames = [...new Set([...stockedStapleNames, ...shopFilters])];
   const isFiltered = (text) => allFilterNames.some(s => normalizeIngredient(text).toLowerCase().includes(s));
   const mainItems = allDeduped.filter(item => !isFiltered(item.text) || unfilteredIds.has(item.id));
   const filteredItems = allDeduped.filter(item => isFiltered(item.text) && !unfilteredIds.has(item.id));
@@ -1797,7 +1843,7 @@ function WeekShoppingList({ week, staples, freezer, fridge, regulars, regChecked
 // ── Week View ─────────────────────────────────────────────────────────────────
 
 function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer, staples, regulars, regChecked, shopChecked, freeShop, radar, customTags, customCategories,
-  batch, prepTasks, prepChecked, onAddItem, onRemoveItem, onClearDay, onAddNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
+  batch, prepTasks, prepChecked, onAddItem, onRemoveItem, onMoveItem, onClearDay, onAddNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
   onToggleRegChecked, onToggleShopChecked, onAddFreeShop, onToggleFreeShop, onAdjustFreezerQty, shopFilters }) {
   const [shopOpen, setShopOpen]     = useState(true);
@@ -1808,6 +1854,53 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
   const [sheet, setSheet]           = useState(null);
   const [weekDetail, setWeekDetail] = useState(null);
   const [batchDetail, setBatchDetail] = useState(null);
+
+  // ── Drag-and-drop state ──
+  const [dragItem, setDragItem] = useState(null); // { id, fromDayIndex }
+  const [dropTarget, setDropTarget] = useState(null); // dayIndex being hovered
+  const [touchDrag, setTouchDrag] = useState(null); // { id, fromDayIndex, x, y, title }
+
+  const handleDrop = (toDayIndex) => {
+    if (dragItem && dragItem.fromDayIndex !== toDayIndex) {
+      onMoveItem(dragItem.id, dragItem.fromDayIndex, toDayIndex);
+    }
+    setDragItem(null);
+    setDropTarget(null);
+  };
+
+  // Touch drag: attach window-level listeners when touch drag is active
+  useEffect(() => {
+    if (!touchDrag) return;
+    const handleTouchMove = (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      setTouchDrag(td => td ? { ...td, x: touch.clientX, y: touch.clientY } : null);
+      // Detect which day-col is under the finger
+      const el = document.elementFromPoint(touch.clientX, touch.clientY);
+      if (el) {
+        const dayCol = el.closest('[data-day-index]');
+        if (dayCol) {
+          setDropTarget(parseInt(dayCol.dataset.dayIndex));
+        } else {
+          setDropTarget(null);
+        }
+      }
+    };
+    const handleTouchEnd = () => {
+      if (touchDrag && dropTarget !== null && touchDrag.fromDayIndex !== dropTarget) {
+        onMoveItem(touchDrag.id, touchDrag.fromDayIndex, dropTarget);
+      }
+      setTouchDrag(null);
+      setDragItem(null);
+      setDropTarget(null);
+    };
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd);
+    return () => {
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [touchDrag, dropTarget, onMoveItem]);
 
   // Derived: one prep item per planned recipe that has a prepNote
   const recipePrepItems = week.flatMap(d =>
@@ -1937,7 +2030,11 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
             const isToday = i === todayIndex;
             const dateNum = dayDates[i].getDate();
             return (
-              <div key={i} className="day-col">
+              <div key={i} className={"day-col" + (dropTarget === i ? " drop-target" : "")}
+                data-day-index={i}
+                onDragOver={e => { e.preventDefault(); setDropTarget(i); }}
+                onDragLeave={() => { if (dropTarget === i) setDropTarget(null); }}
+                onDrop={e => { e.preventDefault(); handleDrop(i); }}>
                 <div className={"day-col-header" + (isToday ? " today" : "")}>
                   <span className="day-col-name">{d.day}</span>
                   <span className={"day-col-num" + (isToday ? " today" : "")}>{dateNum}</span>
@@ -1949,8 +2046,13 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
                 )}
                 {d.items.map((item, idx) => (
                   <ItemCard key={item.id} item={item} isToday={isToday} isPrimary={idx === 0}
-                    readyBy={goals.readyBy} onDetail={r => setWeekDetail(r)}
-                    onRemove={() => handleRemoveItem(item.id)} />
+                    readyBy={goals.readyBy} onDetail={r => setWeekDetail({ recipe: r, itemId: item.id })}
+                    onRemove={() => handleRemoveItem(item.id)}
+                    isDragging={dragItem?.id === item.id}
+                    onDragStart={() => setDragItem({ id: item.id, fromDayIndex: i })}
+                    onDragEnd={() => { setDragItem(null); setDropTarget(null); }}
+                    onTouchDragStart={(it) => setTouchDrag({ id: it.id, fromDayIndex: i, x: 0, y: 0, title: it.recipe?.title || it.note || '' })}
+                  />
                 ))}
                 {d.items.length > 0 && (
                   <div className="day-add-card" onClick={() => openSheet(i)}>
@@ -1963,6 +2065,14 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
         </div>
         <div className="week-scroll-fade" />
       </div>
+
+      {touchDrag && (
+        <div className="drag-ghost" style={{
+          left: touchDrag.x - 30, top: touchDrag.y - 20,
+        }}>
+          <div className="drag-ghost-inner">{touchDrag.title}</div>
+        </div>
+      )}
 
       <div className="section-header" style={{cursor:"default"}}>
         <div className="section-header-title">Weekend <em>Batch Cooking</em></div>
@@ -2112,18 +2222,20 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           </div>
         </div>
       )}
-      {weekDetail && (
+      {weekDetail?.recipe && (
         <div className="sheet-overlay">
           <div className="detail-overlay-panel" onClick={e => e.stopPropagation()}>
             <RecipeDetailView
-              recipe={weekDetail}
+              recipe={weekDetail.recipe}
+              source="plan"
+              itemId={weekDetail.itemId}
               onClose={() => setWeekDetail(null)}
               onSave={updated => {
                 onUpdateRecipe(updated);
-                setWeekDetail(updated);
+                setWeekDetail({ ...weekDetail, recipe: updated });
               }}
-              onDelete={id => {
-                onDeleteRecipe(id);
+              onRemoveFromPlan={() => {
+                onRemoveItem(weekDetail.itemId);
                 setWeekDetail(null);
               }}
               customTags={customTags} customCategories={customCategories}
@@ -2136,6 +2248,7 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
           <div className="detail-overlay-panel" onClick={e => e.stopPropagation()}>
             <RecipeDetailView
               recipe={batchDetail}
+              source="library"
               onClose={() => setBatchDetail(null)}
               onSave={updated => {
                 onUpdateRecipe(updated);
@@ -2262,6 +2375,7 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
   if (detail) return (
     <RecipeDetailView
       recipe={detail}
+      source="library"
       onClose={() => setDetail(null)}
       onSave={updated => {
         onUpdateRecipe(updated);
@@ -2707,50 +2821,105 @@ export default function App() {
   const [prepTasks, setPrepTasks]     = useState([]);
   const [prepChecked, setPrepChecked] = useState({});
 
+  // ── Pull-to-refresh ──
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const pullStartY = useRef(null);
+  const pullActive = useRef(false);
+  const contentRef = useRef(null);
+  const PULL_THRESHOLD = 60;
+
+  const handlePullStart = (e) => {
+    if (refreshing) return;
+    const el = contentRef.current;
+    if (el && el.scrollTop === 0) {
+      pullStartY.current = e.touches[0].clientY;
+      pullActive.current = false;
+    }
+  };
+  const refreshingRef = useRef(false);
+  refreshingRef.current = refreshing;
+  const pullDistanceRef = useRef(0);
+  const handlePullMove = (e) => {
+    if (refreshingRef.current || pullStartY.current === null) return;
+    const dy = e.touches[0].clientY - pullStartY.current;
+    if (dy > 0) {
+      pullActive.current = true;
+      const d = Math.min(dy * 0.4, 80);
+      pullDistanceRef.current = d;
+      setPullDistance(d);
+      if (dy > 10) e.preventDefault();
+    } else if (!pullActive.current) {
+      pullStartY.current = null;
+    }
+  };
+  const handlePullEnd = async () => {
+    if (pullStartY.current === null) return;
+    pullStartY.current = null;
+    if (refreshingRef.current) return;
+    if (pullDistanceRef.current >= PULL_THRESHOLD) {
+      setRefreshing(true);
+      setPullDistance(PULL_THRESHOLD * 0.6);
+      try { await loadAllData(); } catch (e) { console.error('refresh failed', e); }
+      setRefreshing(false);
+    }
+    setPullDistance(0);
+    pullDistanceRef.current = 0;
+  };
+
+  // Register touchmove with { passive: false } so preventDefault works on iOS
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.addEventListener('touchmove', handlePullMove, { passive: false });
+    return () => el.removeEventListener('touchmove', handlePullMove);
+  });
+
   // ── Load all data from Supabase ──
+  const loadAllData = async () => {
+    const [recipesData, batchData, fridgeData, freezerData,
+           staplesData, regularsData, prefsData, customTagsData, customCatsData,
+           shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData,
+           shopFiltersData] = await Promise.all([
+      fetchRecipes(),
+      fetchBatchPrep(),
+      fetchFridge(),
+      fetchFreezer(),
+      fetchStaples(),
+      fetchRegulars(),
+      fetchPrefs(),
+      fetchCustomTags(),
+      fetchCustomCategories(),
+      fetchShopChecked(),
+      fetchRegChecked(),
+      fetchFreeShop(),
+      fetchPrepTasks(),
+      fetchPrepChecked(),
+      fetchShopFilters(),
+    ]);
+    setRecipes(recipesData.map(toAppRecipe));
+    await migrateWeekPlanToItems(THIS_WEEK);
+    const weekData = await fetchWeekPlanItems(THIS_WEEK);
+    setWeek(weekData);
+    setBatch(batchData);
+    setFridge(fridgeData);
+    setFreezer(freezerData);
+    setStaples(staplesData);
+    setRegulars(regularsData);
+    setGoals(prefsData);
+    setCustomTags(customTagsData);
+    setCustomCategories(customCatsData);
+    setShopChecked(shopCheckedData);
+    setRegChecked(regCheckedData);
+    setFreeShop(freeShopData);
+    setPrepTasks(prepTasksData);
+    setPrepChecked(prepCheckedData);
+    setShopFilters(shopFiltersData);
+  };
+
   useEffect(() => {
     async function loadAll() {
-      try {
-        const [recipesData, batchData, fridgeData, freezerData,
-               staplesData, regularsData, prefsData, customTagsData, customCatsData,
-               shopCheckedData, regCheckedData, freeShopData, prepTasksData, prepCheckedData,
-               shopFiltersData] = await Promise.all([
-          fetchRecipes(),
-          fetchBatchPrep(),
-          fetchFridge(),
-          fetchFreezer(),
-          fetchStaples(),
-          fetchRegulars(),
-          fetchPrefs(),
-          fetchCustomTags(),
-          fetchCustomCategories(),
-          fetchShopChecked(),
-          fetchRegChecked(),
-          fetchFreeShop(),
-          fetchPrepTasks(),
-          fetchPrepChecked(),
-          fetchShopFilters(),
-        ]);
-        setRecipes(recipesData.map(toAppRecipe));
-        // Migrate old week_plan rows to week_plan_items, then fetch
-        await migrateWeekPlanToItems(THIS_WEEK);
-        const weekData = await fetchWeekPlanItems(THIS_WEEK);
-        setWeek(weekData);
-        setBatch(batchData);
-        setFridge(fridgeData);
-        setFreezer(freezerData);
-        setStaples(staplesData);
-        setRegulars(regularsData);
-        setGoals(prefsData);
-        setCustomTags(customTagsData);
-        setCustomCategories(customCatsData);
-        setShopChecked(shopCheckedData);
-        setRegChecked(regCheckedData);
-        setFreeShop(freeShopData);
-        setPrepTasks(prepTasksData);
-        setPrepChecked(prepCheckedData);
-        setShopFilters(shopFiltersData);
-      } catch (e) { console.error('loadAll failed', e); }
+      try { await loadAllData(); } catch (e) { console.error('loadAll failed', e); }
       setLoading(false);
     }
     loadAll();
@@ -2856,6 +3025,19 @@ export default function App() {
   const handleRemoveItem = async (itemId) => {
     setWeek(w => w.map(d => ({ ...d, items: d.items.filter(it => it.id !== itemId) })));
     try { await removeWeekPlanItem(itemId); } catch (e) { console.error(e); }
+  };
+  const handleMoveItem = async (itemId, fromDayIndex, toDayIndex) => {
+    if (fromDayIndex === toDayIndex) return;
+    const fromDay = week[fromDayIndex];
+    const item = fromDay?.items.find(it => it.id === itemId);
+    if (!item) return;
+    const newSortOrder = week[toDayIndex].items.length;
+    setWeek(w => w.map((d, i) => {
+      if (i === fromDayIndex) return { ...d, items: d.items.filter(it => it.id !== itemId) };
+      if (i === toDayIndex) return { ...d, items: [...d.items, { ...item, sortOrder: newSortOrder }] };
+      return d;
+    }));
+    try { await moveWeekPlanItem(itemId, toDayIndex, newSortOrder); } catch (e) { console.error(e); }
   };
   const handleClearDay = async (dayIndex) => {
     setWeek(w => w.map((d, i) => i === dayIndex ? { ...d, items: [] } : d));
@@ -3122,7 +3304,7 @@ export default function App() {
   const views = {
     week:    <WeekView goals={goals} week={week} recipes={library} onOpenShop={() => setShopSheetOpen(true)} shopCount={regsLeft + stapleNeedCount} fridge={fridge} freezer={freezer} staples={staples} regulars={regulars} regChecked={regChecked} shopChecked={shopChecked} freeShop={freeShop} radar={radar} customTags={customTags} customCategories={customCategories}
       batch={batch} prepTasks={prepTasks} prepChecked={prepChecked}
-      onAddItem={handleAddItem} onRemoveItem={handleRemoveItem} onClearDay={handleClearDay} onAddNote={handleAddNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
+      onAddItem={handleAddItem} onRemoveItem={handleRemoveItem} onMoveItem={handleMoveItem} onClearDay={handleClearDay} onAddNote={handleAddNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
       onToggleRegChecked={handleToggleRegChecked} onToggleShopChecked={handleToggleShopChecked} onAddFreeShop={handleAddFreeShop} onToggleFreeShop={handleToggleFreeShop} shopFilters={shopFilters}
@@ -3134,7 +3316,16 @@ export default function App() {
   return (
     <>
       <div className="app">
-        <div className="content">{views[tab]}</div>
+        <div className="content" ref={contentRef}
+          onTouchStart={handlePullStart} onTouchEnd={handlePullEnd}>
+          {(pullDistance > 0 || refreshing) && (
+            <div className="pull-indicator" style={{ transform: `translateY(${pullDistance - 36}px)` }}>
+              <span className={"pull-spinner" + (refreshing ? " spinning" : "")}
+                style={!refreshing ? { transform: `rotate(${pullDistance * 4}deg)` } : undefined}>↻</span>
+            </div>
+          )}
+          {views[tab]}
+        </div>
         {shopSheetOpen && (
           <ShoppingSheet
             onClose={() => setShopSheetOpen(false)}

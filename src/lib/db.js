@@ -185,6 +185,14 @@ export async function removeWeekPlanItem(id) {
   if (error) console.error('removeWeekPlanItem', error)
 }
 
+export async function moveWeekPlanItem(id, newDay, newSortOrder) {
+  const { error } = await supabase
+    .from('week_plan_items')
+    .update({ day: newDay, sort_order: newSortOrder })
+    .eq('id', id)
+  if (error) console.error('moveWeekPlanItem', error)
+}
+
 export async function clearDayItems(weekStart, dayIndex) {
   const { error } = await supabase
     .from('week_plan_items')
