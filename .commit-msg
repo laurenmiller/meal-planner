@@ -1,1 +1,1 @@
-Add category picker to Try Soon detail sheet for changing item categories
+Remove redundant Recipe Library header, enlarge category section headers, add Try Soon sub-headers within each category; wire up category change in radar detail sheet

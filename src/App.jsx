@@ -2417,10 +2417,6 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
     <div className="tab-section">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:16}}>
         <div><div className="page-title">Recipes</div><div className="page-date">{library.length} saved</div></div>
-      </div>
-
-      <div className="recipe-library-header" style={{marginTop:0, paddingTop:0, borderTop:"none"}}>
-        <div className="recipe-library-title">Recipe <em>Library</em></div>
         <div style={{display:"flex", alignItems:"center", gap:8}}>
           <div className="filter-row" style={{margin:0, flex:"none"}}>
             {filters.map(f => <button key={f.k} className={"fpill"+(filter===f.k?" active":"")} onClick={() => setFilter(f.k)}>{f.l}</button>)}
@@ -2503,6 +2499,7 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
                 )}
                 {sectionRadar.length > 0 && (
                   <div className="radar-interleave">
+                    <div className="radar-interleave-header">Try Soon</div>
                     {sectionRadar.map(item => (
                       <div key={item.id} className="radar-interleave-row" onClick={() => setRadarDetail(item)}>
                         <span className="radar-interleave-icon">→</span>

@@ -261,7 +261,8 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .radar-row:hover .radar-row-remove { opacity: 1; }
 .radar-row-remove:hover { color: #c0392b; }
 /* ── Radar interleaved in library ── */
-.radar-interleave { display: flex; flex-direction: column; margin-top: 4px; }
+.radar-interleave { display: flex; flex-direction: column; margin-top: 8px; }
+.radar-interleave-header { font-family: 'Lato', sans-serif; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sage); margin-bottom: 2px; }
 .radar-interleave-row { display: flex; align-items: center; gap: 8px; padding: 7px 2px; border-bottom: 1px solid var(--border2); cursor: pointer; transition: background 0.1s; }
 .radar-interleave-row:last-child { border-bottom: none; }
 .radar-interleave-row:hover { background: var(--surface2); }
@@ -541,7 +542,7 @@ body { font-family: 'Lato', sans-serif; background: var(--bg); color: var(--ink)
 .cat-select { display: flex; gap: 6px; flex-wrap: wrap; }
 .cat-btn { padding: 5px 14px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface2); font-family: 'Lato', sans-serif; font-size: 12px; color: var(--ink3); cursor: pointer; transition: all 0.15s; }
 .cat-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
-.recipe-section-label { font-family: 'Playfair Display', serif; font-size: 16px; font-style: italic; font-weight: 400; color: var(--ink2); margin: 20px 0 8px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; padding-bottom: 0; }
+.recipe-section-label { font-family: 'Playfair Display', serif; font-size: 20px; font-style: italic; font-weight: 400; color: var(--ink); margin: 24px 0 10px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; padding-bottom: 0; }
 .recipe-section-label:first-child { margin-top: 4px; }
 .recipe-section-count { font-family: 'Lato', sans-serif; font-size: 11px; color: var(--ink4); font-style: normal; font-weight: 400; }
 .recipe-library-header { display: flex; align-items: baseline; justify-content: space-between; margin: 20px 0 12px; padding-top: 16px; border-top: 1px solid var(--border2); }
