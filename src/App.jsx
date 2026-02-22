@@ -1211,9 +1211,13 @@ function PlanSheet({ targetDay, dayIndex, week, recipes, radar, onClose, onAddIt
               </div>
             ))}
 
-            {dinnerRecipes.length === 0 && dinnerRadar.length === 0 && (
-              <div style={{padding:"16px 0", textAlign:"center", color:"var(--ink4)", fontSize:12, fontStyle:"italic"}}>
-                No dinner recipes match "{search}"
+            {dinnerRecipes.length === 0 && dinnerRadar.length === 0 && search.trim() && (
+              <div style={{padding:"16px 0", textAlign:"center"}}>
+                <div style={{color:"var(--ink4)", fontSize:12, fontStyle:"italic", marginBottom:8}}>No dinner recipes match "{search}"</div>
+                <button className="sheet-btn sheet-btn-primary" style={{fontSize:11, padding:"6px 14px"}}
+                  onClick={() => { onAddNote(dayIndex, search.trim()); onClose(); }}>
+                  Save "{search.trim()}" as a note
+                </button>
               </div>
             )}
           </>)}
