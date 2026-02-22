@@ -1236,8 +1236,25 @@ function DayNote({ d, today, onClick }) {
 // Pick from recipe library or add a brand-new recipe.
 // Saves to Sunday Batch Prep (with yield + note fields).
 
-function BatchSheet({ recipes, onClose, onAdd }) {
+function BatchSheet({ recipes, radar, onClose, onAdd, onAddRecipe, customTags = [], customCategories = [] }) {
+  const [mode, setMode] = useState("pick");
   const [search, setSearch] = useState("");
+  const [noteText, setNoteText] = useState("");
+  const [newTitle, setNewTitle] = useState("");
+  const [newUrl, setNewUrl] = useState("");
+  const [newTime, setNewTime] = useState("30");
+  const [newIngredients, setNewIngr] = useState([]);
+  const [newIngrInput, setNewIngrInput] = useState("");
+  const [newSource, setNewSource] = useState("");
+  const [newCategory, setNewCategory] = useState("dinner");
+  const [newTags, setNewTags] = useState([]);
+  const [newPrepNote, setNewPrepNote] = useState("");
+  const [newThumbnailUrl, setNewThumbnailUrl] = useState(null);
+  const [newDescription, setNewDescription] = useState(null);
+  const [newServings, setNewServings] = useState(null);
+  const [newInstructions, setNewInstructions] = useState([]);
+  const [newRawIngredients, setNewRawIngredients] = useState([]);
+  const [saveToLibrary, setSaveToLibrary] = useState(false);
 
   const filtered = recipes.filter(r =>
     search === "" || r.title.toLowerCase().includes(search.toLowerCase())
@@ -1248,29 +1265,233 @@ function BatchSheet({ recipes, onClose, onAdd }) {
     onClose();
   };
 
+  const handleAddNote = () => {
+    if (!noteText.trim()) return;
+    const recipe = {
+      id: Date.now(),
+      title: noteText.trim(),
+      source: "Added manually",
+      url: null,
+      category: "dinner",
+      tags: [],
+      time: 0,
+      ingredients: [],
+      _unsaved: true,
+    };
+    onAdd(recipe);
+    onClose();
+  };
+
+  const handleAddNew = () => {
+    if (!newTitle.trim()) return;
+    const recipe = {
+      id: Date.now(),
+      title: newTitle.trim(),
+      source: saveToLibrary ? (newSource.trim() || "Added manually") : "Added manually",
+      url: newUrl.trim() || null,
+      category: saveToLibrary ? (newCategory || "dinner") : "dinner",
+      tags: saveToLibrary ? newTags : [],
+      time: parseInt(newTime) || 30,
+      ingredients: newIngredients,
+      prepNote: newPrepNote.trim() || undefined,
+      thumbnailUrl: newThumbnailUrl,
+      description: newDescription || null,
+      instructions: newInstructions,
+      servings: newServings || null,
+      rawIngredients: newRawIngredients,
+      _unsaved: !saveToLibrary,
+    };
+    if (saveToLibrary) onAddRecipe(recipe);
+    onAdd(recipe);
+    onClose();
+  };
+
   return (
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle"/>
         <div className="sheet-header">
           <div className="sheet-title">Weekend <em>Batch</em> Prep</div>
-          <div className="sheet-subtitle">Pick a recipe to make ahead this weekend</div>
+          <div className="sheet-subtitle">Add a recipe to make ahead this weekend</div>
         </div>
+
+        <div className="sheet-mode-toggle">
+          <button className={"sheet-mode-btn" + (mode==="pick" ? " active" : "")} onClick={() => setMode("pick")}>
+            Choose recipe
+          </button>
+          <button className={"sheet-mode-btn" + (mode==="note" ? " active" : "")} onClick={() => setMode("note")}>
+            Add non-recipe
+          </button>
+          <button className={"sheet-mode-btn" + (mode==="new" ? " active" : "")} onClick={() => setMode("new")}>
+            New recipe
+          </button>
+        </div>
+
         <div className="sheet-body">
-          <input className="pick-search" placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} autoFocus/>
-          {filtered.map(r => (
-            <div key={r.id} className="pick-recipe-item" onClick={() => handlePick(r)}>
-              <div className="pick-thumb">{r.title[0]}</div>
-              <div style={{flex:1, minWidth:0}}>
-                <div className="pick-recipe-title">{r.title}</div>
-                <div className="pick-recipe-meta">{r.source} · {r.time} min</div>
-                <div className="pick-tags"><Tags tags={r.tags}/></div>
+          {mode === "pick" && (<>
+            <input className="pick-search" placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)} autoFocus/>
+            {filtered.map(r => (
+              <div key={r.id} className="pick-recipe-item" onClick={() => handlePick(r)}>
+                <div className="pick-thumb">{r.title[0]}</div>
+                <div style={{flex:1, minWidth:0}}>
+                  <div className="pick-recipe-title">{r.title}</div>
+                  <div className="pick-recipe-meta">{r.source} · {r.time} min</div>
+                  <div className="pick-tags"><Tags tags={r.tags}/></div>
+                </div>
+                <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
               </div>
-              <span style={{color:"var(--ink4)", fontSize:20}}>›</span>
+            ))}
+            {filtered.length === 0 && (
+              <div style={{padding:"24px 0", textAlign:"center", color:"var(--ink4)", fontSize:13, fontStyle:"italic"}}>
+                No recipes match "{search}"
+              </div>
+            )}
+          </>)}
+
+          {mode === "note" && (
+            <div style={{padding:"8px 0"}}>
+              <div className="form-field">
+                <label className="form-label">What are you prepping?</label>
+                <input
+                  className="form-input"
+                  placeholder="e.g. chicken stock, granola bars"
+                  value={noteText}
+                  autoFocus
+                  onChange={e => setNoteText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && noteText.trim()) handleAddNote();
+                  }}
+                />
+              </div>
             </div>
-          ))}
+          )}
+
+          {mode === "new" && (
+            <div style={{paddingBottom:8}}>
+              {radar && radar.length > 0 && (
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:10, letterSpacing:"0.08em", textTransform:"uppercase", color:"var(--ink4)", fontWeight:700, marginBottom:6}}>From radar</div>
+                  {radar.map(item => (
+                    <div key={item.id}
+                      onMouseDown={e => { e.preventDefault(); setNewTitle(item.title); setNewUrl(item.url || ""); }}
+                      style={{display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderBottom:"1px solid var(--border2)", cursor:"pointer"}}>
+                      <span style={{flex:1, fontSize:12, color: newTitle === item.title ? "var(--accent)" : "var(--ink2)", fontWeight: newTitle === item.title ? 700 : 400, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{item.title}</span>
+                      {item.url && <span style={{fontSize:10, color:"var(--ink4)"}}>↗</span>}
+                    </div>
+                  ))}
+                  <div style={{height:12}}/>
+                </div>
+              )}
+              <div className="form-field">
+                <label className="form-label">Recipe name</label>
+                <input className="form-input" placeholder="e.g. Roast chicken with lemon" value={newTitle}
+                  onChange={e => setNewTitle(e.target.value)}/>
+              </div>
+              <div className="form-field">
+                <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
+                <div style={{display:"flex", alignItems:"center", gap:8}}>
+                  <input className="form-input" style={{flex:1}} placeholder="https://…" value={newUrl}
+                    onChange={e => setNewUrl(e.target.value)}
+                    onBlur={async () => {
+                      if (!newUrl.trim()) return;
+                      const { thumbnailUrl: t, scrapedData } = await fetchRecipeData(newUrl.trim());
+                      if (t) setNewThumbnailUrl(t);
+                      if (scrapedData) {
+                        if (!newTitle.trim() && scrapedData.title) setNewTitle(scrapedData.title);
+                        if (newTime === "30" && scrapedData.cookTime) setNewTime(String(scrapedData.cookTime));
+                        if (!newIngredients.length && scrapedData.ingredients) setNewIngr(scrapedData.ingredients);
+                        if (scrapedData.description) setNewDescription(scrapedData.description);
+                        if (scrapedData.servings) setNewServings(scrapedData.servings);
+                        if (scrapedData.instructions) setNewInstructions(scrapedData.instructions);
+                        if (scrapedData.ingredients) setNewRawIngredients(scrapedData.ingredients);
+                      }
+                    }}/>
+                  {newThumbnailUrl && <img src={newThumbnailUrl} alt="" style={{width:40, height:40, borderRadius:6, objectFit:"cover", flexShrink:0}}/>}
+                </div>
+              </div>
+              <div className="form-field">
+                <label className="form-label">Cook time (min)</label>
+                <input className="form-input" type="number" value={newTime}
+                  onChange={e => setNewTime(e.target.value)}/>
+              </div>
+              <div className="form-field">
+                <label className="form-label">Key ingredients <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
+                <div className="ingredient-tags" onClick={e => e.currentTarget.querySelector("input")?.focus()}>
+                  {newIngredients.map((ing, i) => (
+                    <span key={i} className="ingredient-tag">
+                      <span style={{cursor:"pointer"}} onClick={e => { e.stopPropagation(); setNewIngrInput(ing); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>{ing}</span>
+                      <button className="ingredient-tag-remove" onClick={e => { e.stopPropagation(); setNewIngr(ii => ii.filter((_,idx) => idx !== i)); }}>×</button>
+                    </span>
+                  ))}
+                  <input className="ingredient-tag-input"
+                    placeholder={newIngredients.length === 0 ? "e.g. salmon fillet…" : "add more…"}
+                    value={newIngrInput}
+                    onChange={e => setNewIngrInput(e.target.value)}
+                    onKeyDown={e => {
+                      const v = newIngrInput.trim().toLowerCase();
+                      if ((e.key === "Enter" || e.key === ",") && v) {
+                        e.preventDefault();
+                        if (!newIngredients.includes(v)) setNewIngr(ii => [...ii, v]);
+                        setNewIngrInput("");
+                      } else if (e.key === "Backspace" && !newIngrInput && newIngredients.length > 0) {
+                        setNewIngr(ii => ii.slice(0,-1));
+                      }
+                    }}
+                    onBlur={() => { const v = newIngrInput.trim().toLowerCase(); if (v && !newIngredients.includes(v)) { setNewIngr(ii => [...ii, v]); setNewIngrInput(""); }}}
+                  />
+                </div>
+                <div className="ingredient-tag-hint">Enter or comma to add</div>
+              </div>
+              <div className="form-field">
+                <label className="form-label">Prep note <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
+                <input className="form-input" placeholder="e.g. Marinate overnight" value={newPrepNote}
+                  onChange={e => setNewPrepNote(e.target.value)}/>
+              </div>
+              <div style={{marginTop:12, borderTop:"1px solid var(--border2)", paddingTop:12}}>
+                <label style={{display:"flex", alignItems:"center", gap:8, fontSize:12, color:"var(--ink3)", cursor:"pointer", marginBottom: saveToLibrary ? 12 : 0}}>
+                  <input type="checkbox" checked={saveToLibrary} onChange={e => setSaveToLibrary(e.target.checked)}
+                    style={{accentColor:"var(--accent)"}}/>
+                  <span>Save to recipe library</span>
+                </label>
+                {saveToLibrary && (
+                  <div>
+                    <div className="form-field">
+                      <label className="form-label">Source</label>
+                      <input className="form-input" placeholder="e.g. NYT Cooking, Smitten Kitchen" value={newSource}
+                        onChange={e => setNewSource(e.target.value)}/>
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">Category</label>
+                      <div className="cat-select">
+                        {[["dinner","Dinner"],["breakfast","Breakfast & Snacks"],["sweets","Sweets"],...customCategories.map(c=>[c,c])].map(([k,l]) => (
+                          <button key={k} type="button"
+                            className={"cat-btn" + (newCategory === k ? " active" : "")}
+                            onClick={() => setNewCategory(k)}>
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">Tags</label>
+                      <div className="tag-toggle-row">
+                        {["fish","vegetarian",...customTags].map(t => (
+                          <button key={t} className={"tag-toggle" + (newTags.includes(t) ? " on" : "")}
+                            onClick={() => setNewTags(tt => tt.includes(t) ? tt.filter(x => x !== t) : [...tt, t])}>
+                            {t === "fish" ? "🐟 Fish" : t === "vegetarian" ? "🌿 Veg" : t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <div className="sheet-footer">
+          {mode === "note" && <button className="sheet-btn sheet-btn-primary" disabled={!noteText.trim()} onClick={handleAddNote}>Add</button>}
+          {mode === "new" && <button className="sheet-btn sheet-btn-primary" disabled={!newTitle.trim()} onClick={handleAddNew}>Add</button>}
           <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -1639,8 +1860,12 @@ function WeekView({ goals, week, recipes, onOpenShop, shopCount, fridge, freezer
       {sheet !== null && sheet.mode === 'batch' && (
         <BatchSheet
           recipes={recipes}
+          radar={radar}
           onClose={closeSheet}
           onAdd={handleAddBatch}
+          onAddRecipe={onAddRecipe}
+          customTags={customTags}
+          customCategories={customCategories}
         />
       )}
     </div>
