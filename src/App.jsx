@@ -1820,8 +1820,7 @@ function ShopView({ week, staples, freezer, fridge, regulars, regChecked, onTogg
 function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, customTags, customCategories,
   batch, prepTasks, prepChecked, onAddItem, onRemoveItem, onMoveItem, onClearDay, onAddNote, onAddRecipe, onUpdateRecipe, onDeleteRecipe, onWeekReset, onPromoteRadar,
   onAddBatch, onRemoveBatch, onAddPrepTask, onTogglePrepTask, onTogglePrepChecked,
-  onAdjustFreezerQty, debugInfo }) {
-  const [debugDismissed, setDebugDismissed] = useState(false);
+  onAdjustFreezerQty }) {
   const [prepOpen, setPrepOpen]     = useState(true);
   const [confirmReset, setConfirmReset] = useState(false);
   const [promoteSheet, setPromoteSheet] = useState(null);
@@ -1952,15 +1951,6 @@ function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, custo
 
   return (
     <div>
-      {debugInfo && !debugDismissed && (
-        <div style={{background:"#fffbe6", border:"1px solid #e6d96c", borderRadius:8, padding:"6px 10px", margin:"0 0 10px", fontSize:11, fontFamily:"monospace", display:"flex", alignItems:"center", gap:10}}>
-          <div style={{flex:1}}>
-            <strong>DEBUG</strong> &nbsp; THIS_WEEK={debugInfo.thisWeek} &nbsp; items={debugInfo.itemCount}
-            {debugInfo.loadError && <span style={{color:"#c0392b"}}> &nbsp; err: {debugInfo.loadError}</span>}
-          </div>
-          <button onClick={() => setDebugDismissed(true)} style={{background:"none", border:"none", cursor:"pointer", fontSize:14, color:"#999"}}>×</button>
-        </div>
-      )}
       <div className="page-header">
         <div>
           <div className="page-title">This <em>Week</em></div>
@@ -2277,7 +2267,7 @@ function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, custo
 
 // ── Recipes View ──────────────────────────────────────────────────────────────
 
-function RadarDetailSheet({ item, onClose, onPromote, onPlan, onChangeCategory, customCategories = [] }) {
+function RadarDetailSheet({ item, onClose, onPromote, onRemove, onPlan, onChangeCategory, customCategories = [] }) {
   const cats = [{k:"dinner",l:"Dinner"},{k:"breakfast",l:"Breakfast"},{k:"sweets",l:"Sweets"},...customCategories.map(c=>({k:c,l:c}))];
   return (
     <div className="sheet-overlay" onClick={onClose}>
@@ -2319,6 +2309,11 @@ function RadarDetailSheet({ item, onClose, onPromote, onPlan, onChangeCategory, 
           </div>
         </div>
         <div className="sheet-footer">
+          {onRemove && (
+            <button className="sheet-btn" style={{color:"#c0392b", borderColor:"#f0b8b0"}} onClick={onRemove}>
+              Remove
+            </button>
+          )}
           <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>Close</button>
         </div>
       </div>
@@ -2484,6 +2479,7 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
           item={radarDetail}
           onClose={() => setRadarDetail(null)}
           onPromote={() => { onPromoteRadar(radarDetail.id); setRadarDetail(null); }}
+          onRemove={() => { onRemoveRadar(radarDetail.id); setRadarDetail(null); }}
           customCategories={customCategories}
           onChangeCategory={(cat) => { const updated = { ...radarDetail, category: cat }; onUpdateRecipe(updated); setRadarDetail(updated); }}
         />
@@ -2830,7 +2826,6 @@ const TABS = [
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
   const [tab, setTab_]      = useState(() => localStorage.getItem("mp-tab") || "week");
   const setTab = t => { setTab_(t); localStorage.setItem("mp-tab", t); };
   const [goals, setGoals]     = useState({ fishMin: 1, vegMin: 2, readyBy: "18:30" });
@@ -2973,7 +2968,7 @@ export default function App() {
 
   useEffect(() => {
     async function loadAll() {
-      try { await loadAllData(); } catch (e) { console.error('loadAll failed', e); setLoadError(String(e)); }
+      try { await loadAllData(); } catch (e) { console.error('loadAll failed', e); }
       setLoading(false);
     }
     loadAll();
@@ -3412,8 +3407,7 @@ export default function App() {
       onAddItem={handleAddItem} onRemoveItem={handleRemoveItem} onMoveItem={handleMoveItem} onClearDay={handleClearDay} onAddNote={handleAddNote} onAddRecipe={handleAddRecipe} onUpdateRecipe={handleUpdateRecipe} onDeleteRecipe={handleDeleteRecipe} onWeekReset={handleWeekReset} onPromoteRadar={handlePromoteRadar}
       onAddBatch={handleAddBatch} onRemoveBatch={handleRemoveBatch}
       onAddPrepTask={handleAddPrepTask} onTogglePrepTask={handleTogglePrepTask} onTogglePrepChecked={handleTogglePrepChecked}
-      onAdjustFreezerQty={handleAdjustFreezerQty}
-      debugInfo={{ thisWeek: THIS_WEEK, itemCount: week.reduce((n, d) => n + d.items.length, 0), loadError }} />,
+      onAdjustFreezerQty={handleAdjustFreezerQty} />,
     shop:    <ShopView week={week} staples={staples} freezer={freezer} fridge={fridge}
       regulars={regulars} regChecked={regChecked} onToggleRegChecked={handleToggleRegChecked}
       shopChecked={shopChecked} onToggleShopChecked={handleToggleShopChecked}
