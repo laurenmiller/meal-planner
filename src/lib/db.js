@@ -4,16 +4,8 @@ import { supabase } from './supabase.js'
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-/** Current Monday as YYYY-MM-DD */
-function getCurrentMonday() {
-  const d = new Date()
-  const day = d.getDay() // 0=Sun
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-  const mon = new Date(d.setDate(diff))
-  return mon.toISOString().slice(0, 10)
-}
-
-export const THIS_WEEK = getCurrentMonday()
+// Fixed constant — week_start column kept for DB constraints but not used as a date partition.
+export const THIS_WEEK = '2000-01-03'
 
 // ── Recipe shape converter ───────────────────────────────────────────────────
 
@@ -210,52 +202,15 @@ export async function clearWeekPlanItems(weekStart) {
   if (error) console.error('clearWeekPlanItems', error)
 }
 
-export async function migrateWeekPlanToItems(weekStart) {
-  // Check if items already exist for this week — skip if so
-  const { data: existing, error: checkErr } = await supabase
-    .from('week_plan_items')
-    .select('id')
-    .eq('week_start', weekStart)
-    .limit(1)
-  if (checkErr) { console.error('migrateWeekPlanToItems check', checkErr); return }
-  if (existing && existing.length > 0) return
-
-  // Read old week_plan rows
-  const { data: oldRows, error: oldErr } = await supabase
-    .from('week_plan')
-    .select('*, recipe:recipes(*)')
-    .eq('week_start', weekStart)
-  if (oldErr) { console.error('migrateWeekPlanToItems read', oldErr); return }
-  if (!oldRows || oldRows.length === 0) return
-
-  const inserts = []
-  oldRows.forEach(row => {
-    if (row.recipe_id && row.recipe) {
-      inserts.push({
-        week_start: weekStart,
-        day: row.day,
-        sort_order: 0,
-        item_type: 'recipe',
-        recipe_id: row.recipe_id,
-        ingredients: row.recipe.ingredients || null,
-        cook_time: row.recipe.time_mins || null,
-        thumbnail_url: row.recipe.thumbnail_url || null,
-      })
-    } else if (row.note) {
-      inserts.push({
-        week_start: weekStart,
-        day: row.day,
-        sort_order: 0,
-        item_type: 'note',
-        note: row.note,
-      })
-    }
-  })
-  if (inserts.length > 0) {
-    const { error: insertErr } = await supabase
-      .from('week_plan_items')
-      .insert(inserts)
-    if (insertErr) console.error('migrateWeekPlanToItems insert', insertErr)
+/** Migrate rows with old date-based week_start to the fixed constant */
+export async function migrateWeekStartToFixed() {
+  const tables = ['week_plan_items', 'batch_prep', 'shop_checked', 'reg_checked', 'prep_tasks', 'prep_checked']
+  for (const table of tables) {
+    const { error } = await supabase
+      .from(table)
+      .update({ week_start: THIS_WEEK })
+      .neq('week_start', THIS_WEEK)
+    if (error) console.error(`migrateWeekStart ${table}`, error)
   }
 }
 

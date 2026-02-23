@@ -3,7 +3,7 @@ import './styles.css';
 import { supabase } from './lib/supabase.js';
 import {
   fetchRecipes, addRecipe as dbAddRecipe, updateRecipe as dbUpdateRecipe, deleteRecipe as dbDeleteRecipe, toAppRecipe,
-  fetchWeekPlanItems, addWeekPlanItem, removeWeekPlanItem, moveWeekPlanItem, clearWeekPlanItems, clearDayItems, migrateWeekPlanToItems,
+  fetchWeekPlanItems, addWeekPlanItem, removeWeekPlanItem, moveWeekPlanItem, clearWeekPlanItems, clearDayItems, migrateWeekStartToFixed,
   fetchBatchPrep, addBatchItem, removeBatchItem, clearBatchPrep,
   addRadarItem as dbAddRadarItem, promoteToLibrary as dbPromoteToLibrary,
   fetchFridge, addFridgeItem as dbAddFridgeItem, updateFridgeItem as dbUpdateFridgeItem, removeFridgeItem as dbRemoveFridgeItem,
@@ -1906,14 +1906,24 @@ function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, custo
   // Compute today index (0=Mon..6=Sun) and date numbers for each day
   // Display order: Sunday first
   const DISPLAY_ORDER = [6, 0, 1, 2, 3, 4, 5];
-  const mondayDate = new Date(THIS_WEEK + 'T00:00:00');
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const dow = now.getDay(); // 0=Sun
+  const mondayDate = new Date(now);
+  mondayDate.setDate(now.getDate() - dow + (dow === 0 ? -6 : 1));
+  mondayDate.setHours(0, 0, 0, 0);
+  const todayIndex = (() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(mondayDate); d.setDate(mondayDate.getDate() + i);
+      if (d.getTime() === today.getTime()) return i;
+    }
+    return -1;
+  })();
   const dayDates = DAY_NAMES.map((_, i) => {
     const d = new Date(mondayDate);
-    d.setDate(d.getDate() + i);
+    d.setDate(mondayDate.getDate() + i);
     return d;
   });
-  const todayIndex = dayDates.findIndex(d => d.toISOString().slice(0, 10) === todayStr);
 
   const allRecipeItems = week.flatMap(d => d.items.filter(it => it.itemType === 'recipe' && it.recipe));
   const fishCount  = allRecipeItems.filter(it => it.recipe.tags?.includes("fish")).length;
@@ -2919,7 +2929,7 @@ export default function App() {
       fetchShopSectionKeywords(),
     ]);
     setRecipes(recipesData.map(toAppRecipe));
-    await migrateWeekPlanToItems(THIS_WEEK);
+    await migrateWeekStartToFixed();
     const weekData = await fetchWeekPlanItems(THIS_WEEK);
     setWeek(weekData);
     setBatch(batchData);
