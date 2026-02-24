@@ -2267,19 +2267,35 @@ function WeekView({ goals, week, recipes, fridge, freezer, staples, radar, custo
 
 // ── Recipes View ──────────────────────────────────────────────────────────────
 
-function RadarDetailSheet({ item, onClose, onPromote, onRemove, onPlan, onChangeCategory, customCategories = [] }) {
+function RadarDetailSheet({ item, onClose, onPromote, onRemove, onSave, onPlan, onChangeCategory, customCategories = [] }) {
   const cats = [{k:"dinner",l:"Dinner"},{k:"breakfast",l:"Breakfast"},{k:"sweets",l:"Sweets"},...customCategories.map(c=>({k:c,l:c}))];
+  const [title, setTitle] = useState(item.title);
+  const [url, setUrl] = useState(item.url || "");
+  const [source, setSource] = useState(item.source || "");
+  const dirty = title !== item.title || (url || "") !== (item.url || "") || (source || "") !== (item.source || "");
+  const handleSave = () => {
+    if (!title.trim()) return;
+    onSave({ ...item, title: title.trim(), url: url.trim() || null, source: source.trim() || "" });
+  };
   return (
     <div className="sheet-overlay" onClick={onClose}>
       <div className="sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle"/>
-        <div className="sheet-header">
-          <div className="sheet-title"><em>{item.title}</em></div>
-          {item.source && <div className="sheet-subtitle">{item.source}</div>}
-        </div>
-        <div className="sheet-body">
-          {item.url && (
-            <a href={item.url} target="_blank" rel="noopener noreferrer" className="detail-link">
+        <div className="sheet-body" style={{paddingTop: 16}}>
+          <div className="form-field">
+            <label className="form-label">Name</label>
+            <input className="form-input" value={title} onChange={e => setTitle(e.target.value)} />
+          </div>
+          <div className="form-field">
+            <label className="form-label">URL <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
+            <input className="form-input" value={url} placeholder="https://…" onChange={e => setUrl(e.target.value)} />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Source <span style={{fontWeight:400,color:"var(--ink4)"}}>optional</span></label>
+            <input className="form-input" value={source} placeholder="e.g. NYT Cooking" onChange={e => setSource(e.target.value)} />
+          </div>
+          {item.url && !dirty && (
+            <a href={item.url} target="_blank" rel="noopener noreferrer" className="detail-link" style={{marginTop:4}}>
               <span className="detail-link-icon">🔗</span>
               <div className="detail-link-text">
                 <div className="detail-link-label">Open recipe</div>
@@ -2288,7 +2304,7 @@ function RadarDetailSheet({ item, onClose, onPromote, onRemove, onPlan, onChange
               <span className="detail-link-arrow">›</span>
             </a>
           )}
-          <div style={{marginTop: item.url ? 16 : 0}}>
+          <div style={{marginTop: 12}}>
             <div className="form-label">Category</div>
             <div className="cat-select">
               {cats.map(c => (
@@ -2298,6 +2314,11 @@ function RadarDetailSheet({ item, onClose, onPromote, onRemove, onPlan, onChange
             </div>
           </div>
           <div className="radar-sheet-actions" style={{marginTop: 16}}>
+            {dirty && (
+              <button className="sheet-btn sheet-btn-primary" onClick={handleSave}>
+                Save changes
+              </button>
+            )}
             <button className="sheet-btn sheet-btn-primary" onClick={onPromote}>
               Add to recipe library
             </button>
@@ -2314,7 +2335,7 @@ function RadarDetailSheet({ item, onClose, onPromote, onRemove, onPlan, onChange
               Remove
             </button>
           )}
-          <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>Close</button>
+          <button className="sheet-btn sheet-btn-cancel" onClick={onClose}>{dirty ? "Discard" : "Close"}</button>
         </div>
       </div>
     </div>
@@ -2480,6 +2501,7 @@ function RecipesView({ recipes, library, onAddRecipe, onUpdateRecipe, onDeleteRe
           onClose={() => setRadarDetail(null)}
           onPromote={() => { onPromoteRadar(radarDetail.id); setRadarDetail(null); }}
           onRemove={() => { onRemoveRadar(radarDetail.id); setRadarDetail(null); }}
+          onSave={(updated) => { onUpdateRecipe(updated); setRadarDetail(updated); }}
           customCategories={customCategories}
           onChangeCategory={(cat) => { const updated = { ...radarDetail, category: cat }; onUpdateRecipe(updated); setRadarDetail(updated); }}
         />
